@@ -1,5 +1,7 @@
 # FBI Remote Install 协议
 
+[English](FBI_PROTOCOL.en.md)
+
 CIA Bridge 实现 FBI 的两个远程安装入口。
 
 ## 二维码入口
