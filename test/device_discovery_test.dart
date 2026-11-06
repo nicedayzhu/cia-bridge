@@ -3,6 +3,51 @@ import 'package:cia_bridge/core/models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('parses a versioned FBI discovery reply from the same subnet', () {
+    final device = parseFbiDiscoveryResponse(
+      payload: 'CIA_BRIDGE_FBI_V1;tcp=5000',
+      sourceIp: '192.168.0.103',
+      localAddress: '192.168.0.104',
+    );
+
+    expect(device, isNotNull);
+    expect(device!.ip, '192.168.0.103');
+    expect(device.port, 5000);
+    expect(device.isProtocolDiscovered, isTrue);
+  });
+
+  test('rejects malformed, local, and cross-subnet discovery replies', () {
+    NearbyDevice? parse(String payload, String sourceIp) {
+      return parseFbiDiscoveryResponse(
+        payload: payload,
+        sourceIp: sourceIp,
+        localAddress: '192.168.0.104',
+      );
+    }
+
+    expect(parse('CIA_BRIDGE_FBI_V1;tcp=0', '192.168.0.103'), isNull);
+    expect(parse('CIA_BRIDGE_FBI_V2;tcp=5000', '192.168.0.103'), isNull);
+    expect(parse('CIA_BRIDGE_FBI_V1;tcp=5000\n', '192.168.0.103'), isNull);
+    expect(parse('CIA_BRIDGE_FBI_V1;tcp=5000', '192.168.0.104'), isNull);
+    expect(parse('CIA_BRIDGE_FBI_V1;tcp=5000', '192.168.1.103'), isNull);
+  });
+
+  test('prefers an exact protocol reply without scanning neighbors', () async {
+    var neighborScanCalled = false;
+    const receiver = NearbyDevice(
+      ip: '192.168.0.103',
+      mac: '',
+      isProtocolDiscovered: true,
+    );
+    final discovery = DeviceDiscovery((_) async {
+      neighborScanCalled = true;
+      return const [];
+    }, protocolScanner: (_) async => const [receiver]);
+
+    expect(await discovery.scan('192.168.0.104'), const [receiver]);
+    expect(neighborScanCalled, isFalse);
+  });
+
   test('recognizes Nintendo OUIs in common MAC address formats', () {
     expect(isNintendoMac('E8:4E:CE:12:34:56'), isTrue);
     expect(isNintendoMac('00-1F-32-AA-BB-CC'), isTrue);

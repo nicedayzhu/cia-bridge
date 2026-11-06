@@ -10,6 +10,7 @@ CIA Bridge is a modern LAN sender for FBI Remote Install on Nintendo 3DS. It run
 
 - Shared LocalSend-inspired Flutter experience on Windows and Android.
 - A focused two-stage flow: choose a 3DS first, then choose files and send.
+- Exact receive-state discovery with the compatible [FBI-curl fork](https://github.com/nicedayzhu/FBI).
 - Automatic Nintendo OUI discovery where the operating system exposes neighbor MAC addresses.
 - Safe online-device candidates on modern Android, where neighbor MAC addresses are restricted.
 - Manual IP entry remains available as a fallback; FBI uses TCP port `5000` by default.
@@ -38,7 +39,7 @@ The Windows executable must remain beside its `data` directory and Flutter runti
 
 1. Connect the computer or phone and the 3DS to the same Wi-Fi or LAN.
 2. On the 3DS, open `FBI → Remote Install → Receive URLs over the network`.
-3. In CIA Bridge, select the discovered Nintendo 3DS. On Android, if devices are marked as candidates, choose the IP shown on the FBI screen.
+3. In CIA Bridge, select the receiver marked **FBI ready**. With an older FBI build, select the Nintendo device or compare a candidate with the IP shown on FBI's screen.
 4. Select one or more supported files and choose **Send to 3DS**.
 5. Confirm the installation in FBI and keep CIA Bridge running until the transfer completes.
 
@@ -51,7 +52,9 @@ The Windows executable must remain beside its `data` directory and Flutter runti
 
 ## Device discovery limits
 
-Stock FBI does not advertise its receive state over broadcast, multicast, or mDNS. On systems that expose the neighbor table, CIA Bridge follows Boop's non-destructive approach and identifies Nintendo hardware by MAC OUI.
+The CIA Bridge-compatible [FBI-curl fork](https://github.com/nicedayzhu/FBI) replies to a small versioned UDP discovery request only while its network receiver is open. CIA Bridge therefore knows both that the target is a 3DS and that FBI is ready, on Windows and Android. The wire format is documented in [the discovery protocol specification](docs/DISCOVERY_PROTOCOL.md).
+
+Stock and older FBI builds do not advertise their receive state. CIA Bridge remains compatible: on systems that expose the neighbor table, it follows Boop's non-destructive approach and identifies Nintendo hardware by MAC OUI.
 
 Modern Android restricts access to other LAN devices' MAC addresses. CIA Bridge therefore falls back to a safe reachability scan of the local `/24` subnet and labels the results as candidates. A candidate is not proof that the device is a Nintendo 3DS or that FBI is waiting; compare it with the IP shown by FBI.
 
@@ -77,6 +80,7 @@ Set `CIA_BRIDGE_FLUTTER`, `ANDROID_HOME`, and `JAVA_HOME` when the tools are not
 
 - [Architecture](docs/ARCHITECTURE.en.md) · [架构说明](docs/ARCHITECTURE.md)
 - [FBI Remote Install protocol](docs/FBI_PROTOCOL.en.md) · [FBI Remote Install 协议](docs/FBI_PROTOCOL.md)
+- [CIA Bridge discovery protocol](docs/DISCOVERY_PROTOCOL.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## Security and legal use

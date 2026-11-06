@@ -21,7 +21,7 @@ Windows 路径 / Android content:// URI
 - `lib/ui`：Material 3 响应式界面，Windows 使用双栏，窄屏 Android 使用单栏。
 - `TransferController`：统一选择文件、网络配置、二维码/推送模式、进度和错误状态。
 - `FbiProtocolClient`：纯 Dart 实现 FBI 的 TCP URL 推送协议，两端复用。
-- `DeviceDiscovery`：用 UDP 无连接报文预热 `/24` 邻居缓存；平台允许读取 MAC 时筛选 Nintendo OUI，现代 Android 隐藏 MAC 时接收安全可达性扫描返回的候选地址。
+- `DeviceDiscovery`：优先广播带版本号的 UDP 请求，精确识别正在等待接收的 CIA Bridge 版 FBI；无回应时预热 `/24` 邻居缓存，继而筛选 Nintendo OUI 或接收 Android 安全可达性候选。
 - `DesktopLanServer`：Windows 上的 Dart `HttpServer`，直接流式读取普通文件路径。
 - `FileHostBridge`：Flutter 与平台能力之间的窄接口。
 - Windows runner：C++ `IFileOpenDialog` 多选文件；不引入 Java 或第三方桌面运行时。
@@ -32,7 +32,7 @@ Windows 路径 / Android content:// URI
 
 - **统一体验**：颜色、排版、文件/设备卡片、状态面板和传输流程全部由一套 Flutter 代码提供。
 - **LocalSend 式主流程**：先发现并选择 3DS，再进入选择文件与发送阶段；后续控件不会提前挤在主界面，端口和网卡收进网络设置。
-- **无破坏发现**：优先读取邻居信息并匹配 Nintendo OUI；现代 Android 无权读取邻居 MAC 时，只扫描同网段安全可达地址并要求用户对照 FBI 屏幕 IP。任何自动发现路径都不会连接 FBI 的 5000 端口。
+- **无破坏发现**：优先使用 UDP/5001 的明确发现响应；旧版 FBI 无回应时读取邻居信息并匹配 Nintendo OUI，现代 Android 再降级为安全可达候选。任何自动发现路径都不会连接 FBI 的 5000 端口。
 - **流式传输**：Windows 使用 `File.openRead`，Android 使用 `ParcelFileDescriptor`/`InputStream`；都不会整体载入 CIA。
 - **明确长度**：选取文件时先确定大小，响应写入固定 `Content-Length`，避免分块传输兼容问题。
 - **Range**：支持一个 `bytes=start-end`、开放结尾或后缀范围，用于重试/续传。
@@ -44,6 +44,6 @@ Windows 路径 / Android content:// URI
 ## 边界
 
 - 不内置公网下载器、资源站或 CIA 目录。
-- FBI 本身不广播接收状态，因此自动发现只能识别 Nintendo OUI 或列出在线候选，无法保证目标已打开 `Receive URLs over the network`。Android 候选需与 FBI 页面显示的 IP 核对。
+- 只有 CIA Bridge 版 FBI 能明确回应接收状态；原版和旧版 FBI 仍只能按 Nintendo OUI 或在线候选发现，Android 候选需与 FBI 页面显示的 IP 核对。
 - Android 文档提供器如果无法报告文件大小，会拒绝共享，避免发送错误长度。
 - QR 容量有限；一次发送多个长 URL 时推荐主动推送模式。

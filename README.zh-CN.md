@@ -10,6 +10,7 @@ CIA Bridge 是一款面向 Nintendo 3DS FBI Remote Install 的现代局域网投
 
 - Windows 与 Android 共用一套受 LocalSend 启发的 Flutter 操作体验。
 - 清晰的两阶段流程：先选择 3DS，再选择文件并发送。
+- 配合 [CIA Bridge 版 FBI-curl](https://github.com/nicedayzhu/FBI)，精确发现已经打开网络接收的 3DS。
 - 系统允许读取邻居 MAC 时，通过 Nintendo OUI 自动识别设备。
 - 现代 Android 隐藏邻居 MAC 时，安全列出同网段在线候选设备。
 - 保留手动 IP 作为回退；FBI 默认使用 TCP 端口 `5000`。
@@ -38,7 +39,7 @@ Windows 可执行文件必须与 `data` 目录和 Flutter 运行库保持在一�
 
 1. 让电脑或手机与 3DS 连接同一个 Wi-Fi 或局域网。
 2. 在 3DS 打开 `FBI → Remote Install → Receive URLs over the network`。
-3. 在 CIA Bridge 中选择发现的 Nintendo 3DS。Android 若显示候选设备，请选择与 FBI 屏幕一致的 IP。
+3. 在 CIA Bridge 中选择标有“FBI 就绪”的设备。若使用旧版 FBI，则选择发现的 Nintendo 设备；显示候选时，请与 FBI 屏幕 IP 核对。
 4. 选择一个或多个支持的文件，然后点击“发送到 3DS”。
 5. 在 FBI 中确认安装，传输完成前保持 CIA Bridge 运行。
 
@@ -51,7 +52,9 @@ Windows 可执行文件必须与 `data` 目录和 Flutter 运行库保持在一�
 
 ## 自动发现的边界
 
-原版 FBI 不会通过广播、组播或 mDNS 公布接收状态。在允许读取邻居表的系统上，CIA Bridge 采用与 Boop 相同的非破坏性思路，通过 MAC OUI 识别 Nintendo 硬件。
+[CIA Bridge 版 FBI-curl](https://github.com/nicedayzhu/FBI) 仅在网络接收界面打开时回应一个轻量、带版本号的 UDP 发现请求。因此 Windows 和 Android 都能同时确认目标是 3DS，并确认 FBI 正在等待接收。报文格式见[自动发现协议](docs/DISCOVERY_PROTOCOL.md)。
+
+原版和旧版 FBI 不会公布接收状态，但 CIA Bridge 仍然兼容：在允许读取邻居表的系统上，程序继续采用与 Boop 相同的非破坏性思路，通过 MAC OUI 识别 Nintendo 硬件。
 
 现代 Android 会限制普通应用读取其他局域网设备的 MAC。因此 CIA Bridge 会降级为安全扫描本地 `/24` 网段中的可达地址，并把结果标记为候选。候选不代表已经确认是 Nintendo 3DS，也不代表 FBI 正在等待接收，请与 FBI 屏幕显示的 IP 核对。
 
@@ -77,6 +80,7 @@ CIA Bridge 不会为了探测设备而连接 TCP/5000。FBI 会把这种连接�
 
 - [架构说明](docs/ARCHITECTURE.md) · [Architecture](docs/ARCHITECTURE.en.md)
 - [FBI Remote Install 协议](docs/FBI_PROTOCOL.md) · [FBI Remote Install protocol](docs/FBI_PROTOCOL.en.md)
+- [CIA Bridge 自动发现协议](docs/DISCOVERY_PROTOCOL.md)
 - [第三方组件说明](THIRD_PARTY_NOTICES.md)
 
 ## 安全与合法使用

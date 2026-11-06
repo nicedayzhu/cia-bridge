@@ -241,6 +241,44 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
   });
 
+  testWidgets('exact FBI receiver is clearly labeled before selection', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(412, 915);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const receiver = NearbyDevice(
+      ip: '192.168.0.103',
+      mac: '',
+      isProtocolDiscovered: true,
+    );
+    final controller = TransferController()
+      ..addresses = ['192.168.0.104']
+      ..selectedAddress = '192.168.0.104'
+      ..devices = [receiver]
+      ..discoveryStatus = '发现 1 台正在等待接收的 3DS';
+    await tester.pumpWidget(
+      MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: buildTheme(),
+        home: HomePage(controller: controller, initializeController: false),
+      ),
+    );
+
+    expect(find.text('FBI 就绪'), findsOneWidget);
+    expect(find.text('192.168.0.103:5000 · 已开启网络接收'), findsOneWidget);
+    await tester.tap(find.text('选择'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('FBI 接收模式'), findsOneWidget);
+    expect(find.text('选择要安装的文件'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+  });
+
   testWidgets('theme menu can switch to dark mode', (tester) async {
     tester.view.physicalSize = const Size(900, 700);
     tester.view.devicePixelRatio = 1;

@@ -49,17 +49,22 @@ class NearbyDevice {
   const NearbyDevice({
     required this.ip,
     required this.mac,
+    this.port = 5000,
     this.isManual = false,
     this.isCandidate = false,
+    this.isProtocolDiscovered = false,
   });
 
   final String ip;
   final String mac;
+  final int port;
   final bool isManual;
   final bool isCandidate;
+  final bool isProtocolDiscovered;
 
   String get name {
     if (isManual) return '手动添加的 3DS';
+    if (isProtocolDiscovered) return 'FBI 接收模式';
     if (isCandidate) return '可能的 Nintendo 3DS';
     return 'Nintendo 3DS';
   }

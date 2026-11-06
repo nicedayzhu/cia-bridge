@@ -160,9 +160,14 @@ class TransferController extends ChangeNotifier {
                 .firstOrNull ??
             selectedBeforeScan;
       }
-      if (selectedDevice != null) targetIp = selectedDevice!.ip;
+      if (selectedDevice != null) {
+        targetIp = selectedDevice!.ip;
+        targetPort = selectedDevice!.port;
+      }
       discoveryStatus = found.isEmpty
           ? '暂未发现 Nintendo 设备；请唤醒 3DS 后重试'
+          : found.every((device) => device.isProtocolDiscovered)
+          ? '发现 ${found.length} 台正在等待接收的 3DS'
           : found.every((device) => device.isCandidate)
           ? '发现 ${found.length} 个在线候选；请对照 FBI 屏幕上的 IP 选择'
           : '发现 ${found.length} 台 Nintendo 设备';
@@ -185,8 +190,9 @@ class TransferController extends ChangeNotifier {
   void selectDevice(NearbyDevice device) {
     selectedDevice = device;
     targetIp = device.ip;
+    targetPort = device.port;
     mode = TransferMode.push;
-    status = '已选择 ${device.name} · ${device.ip}';
+    status = '已选择 ${device.name} · ${device.ip}:${device.port}';
     _notify();
   }
 
@@ -201,7 +207,12 @@ class TransferController extends ChangeNotifier {
       throw StateError('请输入有效的 3DS IPv4 地址');
     }
     if (port < 1 || port > 65535) throw StateError('FBI 端口必须在 1–65535 之间');
-    final manual = NearbyDevice(ip: trimmed, mac: '', isManual: true);
+    final manual = NearbyDevice(
+      ip: trimmed,
+      mac: '',
+      port: port,
+      isManual: true,
+    );
     devices = [manual, ...devices.where((device) => device.ip != trimmed)];
     selectedDevice = manual;
     targetIp = trimmed;

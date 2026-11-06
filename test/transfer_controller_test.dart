@@ -45,6 +45,27 @@ void main() {
     controller.dispose();
   });
 
+  test('uses the port advertised by an exact FBI discovery reply', () async {
+    const receiver = NearbyDevice(
+      ip: '192.168.0.103',
+      mac: '',
+      port: 5123,
+      isProtocolDiscovered: true,
+    );
+    final controller =
+        TransferController(deviceScanner: (_) async => const [receiver])
+          ..addresses = ['192.168.0.104']
+          ..selectedAddress = '192.168.0.104';
+
+    await controller.refreshDevices();
+    controller.selectDevice(receiver);
+
+    expect(controller.discoveryStatus, contains('正在等待接收'));
+    expect(controller.targetIp, receiver.ip);
+    expect(controller.targetPort, 5123);
+    controller.dispose();
+  });
+
   test('discards an old scan after the local address changes', () async {
     final firstScan = Completer<List<NearbyDevice>>();
     final secondScan = Completer<List<NearbyDevice>>();

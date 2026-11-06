@@ -1,18 +1,30 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'models.dart';
 
+const fbiDiscoveryPort = 5001;
+const fbiDiscoveryRequest = 'CIA_BRIDGE_DISCOVER_V1';
+const fbiDiscoveryResponsePrefix = 'CIA_BRIDGE_FBI_V1;tcp=';
+
 class DeviceDiscovery {
-  DeviceDiscovery(this._listNeighbors);
+  DeviceDiscovery(
+    this._listNeighbors, {
+    Future<List<NearbyDevice>> Function(String localAddress)? protocolScanner,
+  }) : _protocolScanner = protocolScanner ?? discoverFbiReceivers;
 
   final Future<List<NetworkNeighbor>> Function(String localAddress)
   _listNeighbors;
+  final Future<List<NearbyDevice>> Function(String localAddress)
+  _protocolScanner;
 
   Future<List<NearbyDevice>> scan(String localAddress) async {
-    final octets = localAddress.split('.');
-    if (octets.length != 4) return const [];
-    final prefix = '${octets[0]}.${octets[1]}.${octets[2]}';
+    final prefix = _ipv4Prefix(localAddress);
+    if (prefix == null) return const [];
+
+    final protocolDevices = await _protocolScanner(localAddress);
+    if (protocolDevices.isNotEmpty) return protocolDevices;
 
     await _warmNeighborCache(prefix, localAddress);
     final neighbors = await _listNeighbors(localAddress);
@@ -35,6 +47,95 @@ class DeviceDiscovery {
       socket?.close();
     }
   }
+}
+
+Future<List<NearbyDevice>> discoverFbiReceivers(String localAddress) async {
+  final prefix = _ipv4Prefix(localAddress);
+  if (prefix == null) return const [];
+
+  RawDatagramSocket? socket;
+  StreamSubscription<RawSocketEvent>? subscription;
+  final found = <String, NearbyDevice>{};
+  try {
+    final activeSocket = await RawDatagramSocket.bind(
+      InternetAddress.anyIPv4,
+      0,
+    );
+    socket = activeSocket;
+    activeSocket.broadcastEnabled = true;
+    subscription = activeSocket.listen((event) {
+      if (event != RawSocketEvent.read) return;
+      while (true) {
+        final datagram = socket?.receive();
+        if (datagram == null) break;
+        try {
+          final device = parseFbiDiscoveryResponse(
+            payload: utf8.decode(datagram.data),
+            sourceIp: datagram.address.address,
+            localAddress: localAddress,
+          );
+          if (device != null) found[device.ip] = device;
+        } on FormatException {
+          // Discovery traffic from unrelated devices is intentionally ignored.
+        }
+      }
+    }, onError: (_) {});
+
+    final request = utf8.encode(fbiDiscoveryRequest);
+    final targets = <InternetAddress>[
+      InternetAddress('$prefix.255'),
+      InternetAddress('255.255.255.255'),
+    ];
+    for (var attempt = 0; attempt < 3; attempt++) {
+      for (final target in targets) {
+        try {
+          activeSocket.send(request, target, fbiDiscoveryPort);
+        } on SocketException {
+          // Some platforms reject the global broadcast but allow the directed one.
+        }
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 170));
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+  } on SocketException {
+    return const [];
+  } finally {
+    await subscription?.cancel();
+    socket?.close();
+  }
+
+  final devices = found.values.toList(growable: false);
+  devices.sort(
+    (left, right) => _lastOctet(left.ip).compareTo(_lastOctet(right.ip)),
+  );
+  return devices;
+}
+
+NearbyDevice? parseFbiDiscoveryResponse({
+  required String payload,
+  required String sourceIp,
+  required String localAddress,
+}) {
+  final localPrefix = _ipv4Prefix(localAddress);
+  final sourcePrefix = _ipv4Prefix(sourceIp);
+  if (localPrefix == null ||
+      sourcePrefix != localPrefix ||
+      sourceIp == localAddress ||
+      !payload.startsWith(fbiDiscoveryResponsePrefix)) {
+    return null;
+  }
+
+  final portText = payload.substring(fbiDiscoveryResponsePrefix.length);
+  if (!RegExp(r'^\d{1,5}$').hasMatch(portText)) return null;
+  final port = int.tryParse(portText);
+  if (port == null || port < 1 || port > 65535) return null;
+
+  return NearbyDevice(
+    ip: sourceIp,
+    mac: '',
+    port: port,
+    isProtocolDiscovered: true,
+  );
 }
 
 List<NearbyDevice> devicesFromNeighbors(
@@ -77,6 +178,18 @@ bool isNintendoMac(String mac) {
 }
 
 int _lastOctet(String address) => int.tryParse(address.split('.').last) ?? 0;
+
+String? _ipv4Prefix(String address) {
+  final octets = address.split('.');
+  if (octets.length != 4 ||
+      octets.any((part) {
+        final value = int.tryParse(part);
+        return value == null || value < 0 || value > 255;
+      })) {
+    return null;
+  }
+  return '${octets[0]}.${octets[1]}.${octets[2]}';
+}
 
 // Nintendo OUIs used by 3DS-family devices. The list follows Boop's discovery
 // approach, but the app never connects just to probe TCP/5000: doing so would

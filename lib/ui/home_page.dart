@@ -796,6 +796,9 @@ class _DeviceChoiceCard extends StatelessWidget {
                         if (device.isManual) ...[
                           const SizedBox(width: 8),
                           _MiniBadge(label: '手动'),
+                        ] else if (device.isProtocolDiscovered) ...[
+                          const SizedBox(width: 8),
+                          _MiniBadge(label: 'FBI 就绪'),
                         ] else if (device.isCandidate) ...[
                           const SizedBox(width: 8),
                           _MiniBadge(label: '候选'),
@@ -804,7 +807,9 @@ class _DeviceChoiceCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      device.isCandidate
+                      device.isProtocolDiscovered
+                          ? '${device.ip}:${device.port} · 已开启网络接收'
+                          : device.isCandidate
                           ? '${device.ip} · 请与 FBI 屏幕 IP 核对'
                           : device.ip,
                       maxLines: 1,

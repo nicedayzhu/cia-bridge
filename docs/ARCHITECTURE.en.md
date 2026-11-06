@@ -21,7 +21,7 @@ Windows path / Android content:// URI
 - `lib/ui`: responsive Material 3 interface, with desktop and narrow mobile layouts.
 - `TransferController`: shared file selection, network settings, QR/push modes, progress, and error state.
 - `FbiProtocolClient`: pure Dart implementation of FBI's TCP URL push protocol.
-- `DeviceDiscovery`: warms the local `/24` neighbor cache with connectionless UDP; filters Nintendo OUIs when MAC addresses are visible and accepts safe reachability candidates on restricted Android systems.
+- `DeviceDiscovery`: first broadcasts a versioned UDP request for an exact, ready FBI receiver; without a reply, warms the local `/24` neighbor cache, filters Nintendo OUIs, and accepts safe Android reachability candidates.
 - `DesktopLanServer`: Dart `HttpServer` for direct streaming from Windows paths.
 - `FileHostBridge`: narrow interface between Flutter and platform capabilities.
 - Windows runner: C++ `IFileOpenDialog` multi-file picker and IP Helper neighbor-table access.
@@ -31,7 +31,7 @@ Windows path / Android content:// URI
 
 - **Shared experience:** one Flutter codebase owns the visual system, cards, states, and transfer flow.
 - **Progressive flow:** users choose a 3DS before entering the file and send stage; network and port controls stay in settings.
-- **Non-destructive discovery:** the app never connects to FBI TCP/5000 merely to probe a device.
+- **Non-destructive discovery:** exact receivers answer on UDP/5001; older FBI builds fall back to Nintendo OUI or safe candidate discovery. The app never connects to FBI TCP/5000 merely to probe a device.
 - **Streaming:** Windows uses `File.openRead`; Android uses `ParcelFileDescriptor` and `InputStream`.
 - **Known length:** every response carries a fixed `Content-Length` for FBI compatibility.
 - **Range support:** one bounded, open-ended, or suffix byte range is supported for retries and resume behavior.
@@ -43,6 +43,6 @@ Windows path / Android content:// URI
 ## Boundaries
 
 - The project does not include a public download client, title catalog, or copyrighted software source.
-- Stock FBI does not advertise its receive state. Discovery can identify a Nintendo OUI or list an online candidate, but cannot prove FBI is waiting.
+- Only the CIA Bridge FBI fork explicitly advertises its receive state. Stock and older builds can still be found by Nintendo OUI or as online candidates, but those fallbacks cannot prove FBI is waiting.
 - Android document providers that cannot report file length are rejected to avoid sending an incorrect response size.
 - QR capacity is limited; TCP URL push is recommended for many long URLs.
