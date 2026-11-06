@@ -51,21 +51,29 @@ try {
     }
 
     $distRoot = Join-Path $projectRoot 'dist'
-    if (Test-Path -LiteralPath $distRoot) {
-        Remove-Item -LiteralPath $distRoot -Recurse -Force
-    }
-    New-Item -ItemType Directory -Path $distRoot | Out-Null
+    New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
 
     if (-not $SkipWindows) {
         $windowsSource = Join-Path $projectRoot 'build\windows\x64\runner\Release'
+        $windowsRoot = Join-Path $distRoot 'windows'
         $windowsTarget = Join-Path $distRoot 'windows\CIA-Bridge-Windows-x64'
+        $windowsArchive = Join-Path $distRoot 'CIA-Bridge-Windows-x64.zip'
+        if (Test-Path -LiteralPath $windowsRoot) {
+            Remove-Item -LiteralPath $windowsRoot -Recurse -Force
+        }
+        if (Test-Path -LiteralPath $windowsArchive) {
+            Remove-Item -LiteralPath $windowsArchive -Force
+        }
         New-Item -ItemType Directory -Path $windowsTarget -Force | Out-Null
         Copy-Item -Path (Join-Path $windowsSource '*') -Destination $windowsTarget -Recurse -Force
-        Compress-Archive -Path (Join-Path $windowsTarget '*') -DestinationPath (Join-Path $distRoot 'CIA-Bridge-Windows-x64.zip') -CompressionLevel Optimal
+        Compress-Archive -Path (Join-Path $windowsTarget '*') -DestinationPath $windowsArchive -CompressionLevel Optimal
     }
 
     if (-not $SkipAndroid) {
         $androidTarget = Join-Path $distRoot 'android'
+        if (Test-Path -LiteralPath $androidTarget) {
+            Remove-Item -LiteralPath $androidTarget -Recurse -Force
+        }
         New-Item -ItemType Directory -Path $androidTarget -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $projectRoot 'build\app\outputs\flutter-apk\app-release.apk') -Destination (Join-Path $androidTarget 'CIA-Bridge-Android-release.apk')
     }
