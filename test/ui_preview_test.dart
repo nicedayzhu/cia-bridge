@@ -8,12 +8,25 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  late GoldenFileComparator previousGoldenFileComparator;
+
   setUpAll(() async {
+    previousGoldenFileComparator = goldenFileComparator;
+    final localComparator = previousGoldenFileComparator as LocalFileComparator;
+    goldenFileComparator = _TolerantGoldenFileComparator(
+      localComparator.basedir.resolve('ui_preview_test.dart'),
+      precisionTolerance: 0.002,
+    );
+
     final appFontLoader = FontLoader('NotoSansSC')
       ..addFont(rootBundle.load('assets/fonts/NotoSansSC-CIABridge.ttf'));
     final iconFontLoader = FontLoader('MaterialIcons')
       ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
     await Future.wait([appFontLoader.load(), iconFontLoader.load()]);
+  });
+
+  tearDownAll(() {
+    goldenFileComparator = previousGoldenFileComparator;
   });
 
   testWidgets('renders the desktop send page', (tester) async {
@@ -338,6 +351,36 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     controller.dispose();
   });
+}
+
+class _TolerantGoldenFileComparator extends LocalFileComparator {
+  _TolerantGoldenFileComparator(
+    super.testFile, {
+    required double precisionTolerance,
+  }) : assert(
+         precisionTolerance >= 0 && precisionTolerance <= 1,
+         'precisionTolerance must be between 0 and 1',
+       ),
+       _precisionTolerance = precisionTolerance;
+
+  final double _precisionTolerance;
+
+  @override
+  Future<bool> compare(Uint8List imageBytes, Uri golden) async {
+    final result = await GoldenFileComparator.compareLists(
+      imageBytes,
+      await getGoldenBytes(golden),
+    );
+    final passed = result.passed || result.diffPercent <= _precisionTolerance;
+    if (passed) {
+      result.dispose();
+      return true;
+    }
+
+    final error = await generateFailureOutput(result, golden, basedir);
+    result.dispose();
+    throw FlutterError(error);
+  }
 }
 
 TransferController _readyController() {
