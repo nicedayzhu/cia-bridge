@@ -16,6 +16,14 @@ abstract class FileHostBridge {
 
   Future<List<ShareFile>> pickFiles();
 
+  Future<Uint8List> readFileRange(
+    ShareFile file, {
+    required int offset,
+    required int length,
+  }) => Future<Uint8List>.error(
+    UnsupportedError('This platform cannot inspect CIA files'),
+  );
+
   Future<List<NetworkNeighbor>> listNeighbors(String localAddress);
 
   Future<HostingSession> start({
@@ -50,6 +58,28 @@ class WindowsFileHostBridge implements FileHostBridge {
           );
         })
         .toList(growable: false);
+  }
+
+  @override
+  Future<Uint8List> readFileRange(
+    ShareFile file, {
+    required int offset,
+    required int length,
+  }) async {
+    final path = file.path;
+    if (path == null) throw StateError('Windows 文件缺少本地路径');
+    if (offset < 0 || length < 0) throw RangeError('文件读取范围无效');
+    final handle = await File(path).open();
+    try {
+      await handle.setPosition(offset);
+      final bytes = await handle.read(length);
+      if (bytes.length != length) {
+        throw const FileSystemException('CIA 文件读取不完整');
+      }
+      return bytes;
+    } finally {
+      await handle.close();
+    }
   }
 
   @override
@@ -117,6 +147,21 @@ class AndroidFileHostBridge implements FileHostBridge {
           );
         })
         .toList(growable: false);
+  }
+
+  @override
+  Future<Uint8List> readFileRange(
+    ShareFile file, {
+    required int offset,
+    required int length,
+  }) async {
+    final bytes = await _channel.invokeMethod<Uint8List>('readFileRange', {
+      'id': file.id,
+      'offset': offset,
+      'length': length,
+    });
+    if (bytes == null) throw StateError('Android 文件读取没有返回数据');
+    return bytes;
   }
 
   @override

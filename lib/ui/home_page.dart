@@ -1221,7 +1221,7 @@ class _SelectedFiles extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           SizedBox(
-            height: 76,
+            height: 100,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: controller.files.length,
@@ -1250,57 +1250,264 @@ class _FileChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      width: 250,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: context.softSurface,
+    final metadata = file.ciaMetadata;
+    final metadataLine = switch (file.metadataState) {
+      CiaMetadataState.loading => '正在读取 CIA 软件信息…',
+      CiaMetadataState.available =>
+        '${metadata!.kind.label} · ${metadata.versionLabel} · ${metadata.regionLabel}',
+      CiaMetadataState.unavailable => 'CIA 软件信息不可用',
+      CiaMetadataState.notApplicable => _selectedFileTypeLabel(file),
+    };
+    final originalName =
+        metadata?.displayTitle != null && metadata!.displayTitle != file.name
+        ? '${file.name} · ${formatBytes(file.size)}'
+        : formatBytes(file.size);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _showFileDetails(context, file),
         borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: theme.colorScheme.outline),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.secondary.withValues(alpha: 0.13),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const CiaCartridgeGlyph(size: 32),
+        child: Ink(
+          width: 310,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: context.softSurface,
+            borderRadius: BorderRadius.circular(15),
+            border: Border.all(color: theme.colorScheme.outline),
           ),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+          child: Row(
+            children: [
+              _FileArtwork(file: file, size: 58),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      file.displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      metadataLine,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color:
+                            file.metadataState == CiaMetadataState.unavailable
+                            ? theme.colorScheme.error
+                            : context.mutedColor,
+                        fontSize: 11,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      originalName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: context.mutedColor, fontSize: 10),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                onPressed: onRemove,
+                tooltip: '移除',
+                icon: const Icon(Icons.close_rounded, size: 18),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _selectedFileTypeLabel(ShareFile file) {
+  final lower = file.name.toLowerCase();
+  if (lower.endsWith('.cia')) return 'CIA 安装包';
+  if (lower.endsWith('.tik')) return 'Ticket 文件';
+  if (lower.endsWith('.cetk')) return 'CETK 文件';
+  if (lower.endsWith('.3dsx')) return '3DSX 应用';
+  return '安装文件';
+}
+
+class _FileArtwork extends StatelessWidget {
+  const _FileArtwork({required this.file, required this.size});
+
+  final ShareFile file;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = file.ciaMetadata?.iconPng;
+    final fallback = Center(child: CiaCartridgeGlyph(size: size * 0.58));
+    return Container(
+      width: size,
+      height: size,
+      padding: bytes == null ? EdgeInsets.all(size * 0.16) : EdgeInsets.zero,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.secondary.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: bytes == null
+          ? fallback
+          : Image.memory(
+              bytes,
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.none,
+              gaplessPlayback: true,
+              errorBuilder: (_, _, _) => fallback,
+            ),
+    );
+  }
+}
+
+Future<void> _showFileDetails(BuildContext context, ShareFile file) =>
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => _FileDetailsSheet(file: file),
+    );
+
+class _FileDetailsSheet extends StatelessWidget {
+  const _FileDetailsSheet({required this.file});
+
+  final ShareFile file;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final metadata = file.ciaMetadata;
+    final unavailable = file.metadataState == CiaMetadataState.unavailable;
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(22, 2, 22, 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  file.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 13,
+                _FileArtwork(file: file, size: 68),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        file.displayName,
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        metadata?.kind.label ?? _selectedFileTypeLabel(file),
+                        style: TextStyle(color: context.mutedColor),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  formatBytes(file.size),
-                  style: TextStyle(color: context.mutedColor, fontSize: 11),
                 ),
               ],
             ),
-          ),
-          IconButton(
-            onPressed: onRemove,
-            tooltip: '移除',
-            icon: const Icon(Icons.close_rounded, size: 18),
-            visualDensity: VisualDensity.compact,
-          ),
-        ],
+            const SizedBox(height: 20),
+            _FileDetailRow(label: '文件名', value: file.name),
+            _FileDetailRow(label: '文件大小', value: formatBytes(file.size)),
+            if (file.metadataState == CiaMetadataState.loading)
+              const _FileDetailNotice(text: '正在读取 CIA 内置的软件信息…')
+            else if (unavailable)
+              _FileDetailNotice(
+                text: file.metadataError?.isNotEmpty == true
+                    ? '无法读取 CIA 内置信息：${file.metadataError}'
+                    : '无法读取 CIA 内置的软件信息。文件仍可正常发送。',
+                isError: true,
+              )
+            else if (metadata != null) ...[
+              _FileDetailRow(label: 'Title ID', value: metadata.titleId),
+              _FileDetailRow(label: '版本', value: metadata.versionLabel),
+              _FileDetailRow(label: '地区', value: metadata.regionLabel),
+              if (metadata.publisher?.isNotEmpty == true)
+                _FileDetailRow(label: '发行者', value: metadata.publisher!),
+              if (metadata.longTitle?.isNotEmpty == true &&
+                  metadata.longTitle != metadata.shortTitle)
+                _FileDetailRow(label: '完整名称', value: metadata.longTitle!),
+              if (metadata.isNew3dsOnly)
+                const _FileDetailRow(
+                  label: '机型要求',
+                  value: '仅支持 New Nintendo 3DS',
+                ),
+              if (!metadata.hasSmdh)
+                const _FileDetailNotice(
+                  text: '此 CIA 没有包含 SMDH，因此无法显示软件名称、发行者、地区和图标。',
+                ),
+              if (metadata.metaReadError?.isNotEmpty == true)
+                _FileDetailNotice(
+                  text: 'Title ID 和版本已读取；图标信息不可用：${metadata.metaReadError}',
+                ),
+            ],
+          ],
+        ),
       ),
+    );
+  }
+}
+
+class _FileDetailRow extends StatelessWidget {
+  const _FileDetailRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 7),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 78,
+          child: Text(label, style: TextStyle(color: context.mutedColor)),
+        ),
+        Expanded(
+          child: SelectableText(
+            value,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _FileDetailNotice extends StatelessWidget {
+  const _FileDetailNotice({required this.text, this.isError = false});
+
+  final String text;
+  final bool isError;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = isError ? theme.colorScheme.error : theme.colorScheme.primary;
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(text, style: TextStyle(color: color, height: 1.4)),
     );
   }
 }

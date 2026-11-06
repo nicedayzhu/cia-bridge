@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:cia_bridge/core/models.dart';
 import 'package:cia_bridge/platform/file_host_bridge.dart';
@@ -146,6 +147,7 @@ void main() {
 
     expect(controller.files, hasLength(1));
     expect(controller.files.single.name, '3DShell.cia');
+    expect(controller.files.single.metadataState, CiaMetadataState.unavailable);
     expect(controller.status, contains('已准备 1 个文件'));
     expect(notifications, greaterThan(0));
     controller.dispose();
@@ -162,6 +164,15 @@ class _FakeBridge implements FileHostBridge {
 
   @override
   Future<List<ShareFile>> pickFiles() async => pickedFiles;
+
+  @override
+  Future<Uint8List> readFileRange(
+    ShareFile file, {
+    required int offset,
+    required int length,
+  }) => Future<Uint8List>.error(
+    UnsupportedError('Test bridge does not expose file bytes'),
+  );
 
   @override
   Future<List<NetworkNeighbor>> listNeighbors(String localAddress) async =>

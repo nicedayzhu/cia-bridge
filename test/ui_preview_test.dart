@@ -323,6 +323,52 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('selected CIA shows offline metadata and a detail sheet', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final controller = _readyController();
+    controller.files[0] = const ShareFile(
+      id: 'preview-cia',
+      name: 'renamed-file.cia',
+      size: 1600000,
+      metadataState: CiaMetadataState.available,
+      ciaMetadata: CiaMetadata(
+        titleId: '000400000FF40A00',
+        titleVersion: 2069,
+        kind: CiaTitleKind.application,
+        shortTitle: '测试软件',
+        longTitle: 'CIA Bridge 测试软件',
+        publisher: '本地发行者',
+        regionMask: 0x12,
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: buildTheme(),
+        home: HomePage(controller: controller, initializeController: false),
+      ),
+    );
+
+    expect(find.text('测试软件'), findsOneWidget);
+    expect(find.text('游戏 / 应用 · v2.1.5 · 美/中'), findsOneWidget);
+    await tester.tap(find.text('测试软件'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Title ID'), findsOneWidget);
+    expect(find.text('000400000FF40A00'), findsOneWidget);
+    expect(find.text('本地发行者'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+    controller.dispose();
+  });
+
   testWidgets('file stage returns to discovery when device is cleared', (
     tester,
   ) async {

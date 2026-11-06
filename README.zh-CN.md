@@ -15,6 +15,7 @@ CIA Bridge 是一款面向 Nintendo 3DS FBI Remote Install 的现代局域网投
 - 现代 Android 隐藏邻居 MAC 时，安全列出同网段在线候选设备。
 - 保留手动 IP 作为回退；FBI 默认使用 TCP 端口 `5000`。
 - 直接流式读取 Windows 文件和 Android `content://` URI，不把完整 CIA 载入内存。
+- 选择 CIA 后离线读取内嵌信息；可用时显示游戏图标、本地化名称、发行商、Title ID、版本、区域、内容类型和 New Nintendo 3DS 要求。
 - 支持二维码安装与 FBI `Receive URLs over the network` 主动推送。
 - HTTP 响应提供固定 `Content-Length`、UTF-8 文件名和单区间 Range。
 - Android 使用前台传输服务，适合大文件和退到后台后的传输。
@@ -22,14 +23,16 @@ CIA Bridge 是一款面向 Nintendo 3DS FBI Remote Install 的现代局域网投
 
 支持 `.cia`、`.tik`、`.cetk` 和 `.3dsx` 文件。
 
+CIA 信息直接来自文件自身的 TMD 与可选 SMDH 元数据。CIA Bridge 只读取所需区间，不访问 3dsdb 或其他在线标题服务；元数据缺失或损坏时也不会阻止文件发送。
+
 ## 下载
 
 从 [GitHub Releases](https://github.com/nicedayzhu/cia-bridge/releases/latest) 下载最新的 Windows x64 便携包或 Android APK。
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
-| Windows x64 | `CIA-Bridge-v0.1.0-Windows-x64.zip` | 完整解压后运行 `cia_bridge.exe`。 |
-| Android 7.0+ | `CIA-Bridge-v0.1.0-Android.apk` | 侧载安装；v0.1.0 APK 使用调试签名证书。 |
+| Windows x64 | `CIA-Bridge-v0.2.0-Windows-x64.zip` | 完整解压后运行 `cia_bridge.exe`。 |
+| Android 7.0+ | `CIA-Bridge-v0.2.0-Android.apk` | 侧载安装；从 v0.2.0 起，正式发布包使用项目固定的 release 签名证书。 |
 
 Windows 可执行文件必须与 `data` 目录和 Flutter 运行库保持在一起，不能只复制 `.exe`。
 

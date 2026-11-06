@@ -5,11 +5,15 @@ import android.content.Intent
 import android.database.Cursor
 import android.net.Uri
 import android.os.Build
+import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.io.EOFException
+import java.io.IOException
+import java.io.InputStream
 import java.net.InetAddress
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
@@ -26,6 +30,7 @@ class MainActivity : FlutterActivity() {
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "pickFiles" -> launchPicker(result)
+                "readFileRange" -> readFileRange(call.arguments, result)
                 "listNeighbors" -> listNeighbors(call.arguments, result)
                 "startServer" -> startServer(call.arguments, result)
                 "stopServer" -> {
@@ -91,6 +96,69 @@ class MainActivity : FlutterActivity() {
             val metadata = queryMetadata(uri)
             mapOf("id" to uri.toString(), "name" to metadata.first, "size" to metadata.second)
         }
+    }
+
+    private fun readFileRange(arguments: Any?, result: MethodChannel.Result) {
+        Thread {
+            try {
+                val args = arguments as? Map<*, *> ?: error("Missing file range options")
+                val uri = Uri.parse(args["id"] as? String ?: error("Missing file URI"))
+                val offset = (args["offset"] as? Number)?.toLong() ?: error("Missing file offset")
+                val length = (args["length"] as? Number)?.toInt() ?: error("Missing range length")
+                require(offset >= 0) { "File offset must be non-negative" }
+                require(length in 0..MAX_METADATA_RANGE_BYTES) { "File range is too large" }
+                val bytes = readUriRange(uri, offset, length)
+                runOnUiThread { result.success(bytes) }
+            } catch (error: Exception) {
+                runOnUiThread { result.error("file_range_failed", error.message, null) }
+            }
+        }.start()
+    }
+
+    private fun readUriRange(uri: Uri, offset: Long, length: Int): ByteArray {
+        try {
+            val descriptor = contentResolver.openFileDescriptor(uri, "r")
+                ?: error("Cannot open the selected file")
+            ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { stream ->
+                stream.channel.position(offset)
+                return readExactly(stream, length)
+            }
+        } catch (error: IOException) {
+            if (offset > MAX_SEQUENTIAL_METADATA_SKIP_BYTES) {
+                throw IOException("The Android file provider does not support random access", error)
+            }
+        }
+
+        val stream = contentResolver.openInputStream(uri)
+            ?: error("Cannot reopen the selected file")
+        stream.use {
+            skipExactly(it, offset)
+            return readExactly(it, length)
+        }
+    }
+
+    private fun skipExactly(stream: InputStream, count: Long) {
+        var remaining = count
+        while (remaining > 0) {
+            val skipped = stream.skip(remaining)
+            if (skipped > 0) {
+                remaining -= skipped
+            } else {
+                if (stream.read() < 0) throw EOFException("Unexpected end of selected file")
+                remaining--
+            }
+        }
+    }
+
+    private fun readExactly(stream: InputStream, length: Int): ByteArray {
+        val bytes = ByteArray(length)
+        var offset = 0
+        while (offset < length) {
+            val read = stream.read(bytes, offset, length - offset)
+            if (read < 0) throw EOFException("Unexpected end of selected file")
+            offset += read
+        }
+        return bytes
     }
 
     private fun listNeighbors(arguments: Any?, result: MethodChannel.Result) {
@@ -273,6 +341,8 @@ class MainActivity : FlutterActivity() {
         private const val REACHABILITY_THREADS = 32
         private const val REACHABILITY_TIMEOUT_MS = 180
         private const val REACHABILITY_SCAN_LIMIT_MS = 2200L
+        private const val MAX_METADATA_RANGE_BYTES = 64 * 1024
+        private const val MAX_SEQUENTIAL_METADATA_SKIP_BYTES = 4L * 1024 * 1024
         private val IPV4 = Regex("^(?:\\d{1,3}\\.){3}\\d{1,3}$")
         private val MAC = Regex("^(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$")
         private val IP_NEIGH = Regex("^((?:\\d{1,3}\\.){3}\\d{1,3})\\s+.*?lladdr\\s+((?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2})")

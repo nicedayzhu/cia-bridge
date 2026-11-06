@@ -15,6 +15,7 @@ CIA Bridge is a modern LAN sender for FBI Remote Install on Nintendo 3DS. It run
 - Safe online-device candidates on modern Android, where neighbor MAC addresses are restricted.
 - Manual IP entry remains available as a fallback; FBI uses TCP port `5000` by default.
 - Direct streaming from Windows files and Android `content://` URIs without loading an entire CIA into memory.
+- Offline CIA inspection after selection, including the embedded title icon, localized name, publisher, title ID, version, region, content type, and New Nintendo 3DS requirement when available.
 - QR-code install and FBI `Receive URLs over the network` push modes.
 - Fixed `Content-Length`, UTF-8 filenames, and single-range HTTP responses.
 - Android foreground transfer service for large files and background operation.
@@ -22,14 +23,16 @@ CIA Bridge is a modern LAN sender for FBI Remote Install on Nintendo 3DS. It run
 
 Supported file types: `.cia`, `.tik`, `.cetk`, and `.3dsx`.
 
+CIA details come from the file's own TMD and optional SMDH metadata. CIA Bridge reads only the required ranges, does not query 3dsdb or another title service, and keeps the file sendable when metadata is missing or malformed.
+
 ## Download
 
 Download the current Windows x64 portable package or Android APK from [GitHub Releases](https://github.com/nicedayzhu/cia-bridge/releases/latest).
 
 | Platform | Package | Notes |
 | --- | --- | --- |
-| Windows x64 | `CIA-Bridge-v0.1.0-Windows-x64.zip` | Extract the complete archive and run `cia_bridge.exe`. |
-| Android 7.0+ | `CIA-Bridge-v0.1.0-Android.apk` | Side-load the APK. The v0.1.0 APK uses a debug signing certificate. |
+| Windows x64 | `CIA-Bridge-v0.2.0-Windows-x64.zip` | Extract the complete archive and run `cia_bridge.exe`. |
+| Android 7.0+ | `CIA-Bridge-v0.2.0-Android.apk` | Side-load the APK. Releases from v0.2.0 onward use the project's persistent release certificate. |
 
 The Windows executable must remain beside its `data` directory and Flutter runtime files. Do not copy only the `.exe`.
 

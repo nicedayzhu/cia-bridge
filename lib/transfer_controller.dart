@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'core/cia_metadata.dart';
 import 'core/fbi_protocol_client.dart';
 import 'core/device_discovery.dart';
 import 'core/lan_addresses.dart';
@@ -11,15 +12,18 @@ import 'platform/file_host_bridge.dart';
 class TransferController extends ChangeNotifier {
   TransferController({
     FileHostBridge? bridge,
+    CiaMetadataParser? metadataParser,
     Future<List<String>> Function()? addressFinder,
     Future<List<NearbyDevice>> Function(String address)? deviceScanner,
   }) : _bridge = bridge ?? FileHostBridge(),
+       _metadataParser = metadataParser ?? const CiaMetadataParser(),
        _addressFinder = addressFinder ?? findLanIpv4Addresses {
     _bridge.onEvent = _handleHostEvent;
     _scanDevices = deviceScanner ?? DeviceDiscovery(_bridge.listNeighbors).scan;
   }
 
   final FileHostBridge _bridge;
+  final CiaMetadataParser _metadataParser;
   final Future<List<String>> Function() _addressFinder;
   late final Future<List<NearbyDevice>> Function(String address) _scanDevices;
   final FbiProtocolClient _fbi = FbiProtocolClient();
@@ -101,19 +105,88 @@ class TransferController extends ChangeNotifier {
   Future<void> pickFiles() async {
     final picked = await _bridge.pickFiles();
     var ignored = 0;
+    final addedCiaIds = <String>[];
     for (final file in picked) {
       if (!file.isSupported) {
         ignored++;
         continue;
       }
       final existing = files.indexWhere((item) => item.id == file.id);
-      if (existing < 0) files.add(file);
+      if (existing < 0) {
+        final selected = file.isCia
+            ? file.withCiaMetadata(state: CiaMetadataState.loading)
+            : file;
+        files.add(selected);
+        if (file.isCia) addedCiaIds.add(file.id);
+      }
     }
     status = files.isEmpty
         ? '没有选择支持的文件'
-        : '已准备 ${files.length} 个文件${ignored > 0 ? '，忽略 $ignored 个不支持的文件' : ''}';
+        : addedCiaIds.isEmpty
+        ? _selectionStatus(ignored: ignored)
+        : '已选择 ${files.length} 个文件，正在读取 CIA 软件信息…';
+    _notify();
+
+    for (final id in addedCiaIds) {
+      await _inspectCia(id);
+    }
+    if (files.isNotEmpty) {
+      status = _selectionStatus(ignored: ignored);
+      _notify();
+    }
+  }
+
+  Future<void> _inspectCia(String id) async {
+    final beforeRead = files.indexWhere((item) => item.id == id);
+    if (beforeRead < 0) return;
+    final file = files[beforeRead];
+    try {
+      final metadata = await _metadataParser.parse(
+        fileSize: file.size,
+        readRange: ({required offset, required length}) =>
+            _bridge.readFileRange(file, offset: offset, length: length),
+      );
+      final current = files.indexWhere((item) => item.id == id);
+      if (current < 0) return;
+      files[current] = files[current].withCiaMetadata(
+        state: CiaMetadataState.available,
+        metadata: metadata,
+      );
+    } on Object catch (error) {
+      final current = files.indexWhere((item) => item.id == id);
+      if (current < 0) return;
+      files[current] = files[current].withCiaMetadata(
+        state: CiaMetadataState.unavailable,
+        error: _cleanMetadataError(error),
+      );
+    }
     _notify();
   }
+
+  String _selectionStatus({required int ignored}) {
+    final recognized = files
+        .where((file) => file.metadataState == CiaMetadataState.available)
+        .length;
+    final unavailable = files
+        .where((file) => file.metadataState == CiaMetadataState.unavailable)
+        .length;
+    final details = <String>[
+      if (recognized > 0) '已识别 $recognized 个 CIA',
+      if (unavailable > 0) '$unavailable 个 CIA 信息不可用',
+      if (ignored > 0) '忽略 $ignored 个不支持的文件',
+    ];
+    return '已准备 ${files.length} 个文件${details.isEmpty ? '' : '，${details.join('，')}'}';
+  }
+
+  String _cleanMetadataError(Object error) => error
+      .toString()
+      .replaceFirst(
+        RegExp(
+          r'^(FormatException|FileSystemException|PlatformException|UnsupportedError|StateError):\s*',
+        ),
+        '',
+      )
+      .trim();
 
   void removeFile(ShareFile file) {
     files.removeWhere((item) => item.id == file.id);
