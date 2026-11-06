@@ -16,3 +16,5 @@ test/failures/
 windows/flutter/ephemeral/
 android/.gradle/
 android/local.properties
+docs/promo/
+.secrets/

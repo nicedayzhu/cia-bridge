@@ -1,0 +1,192 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: 3.47.9
+
+jobs:
+  validate:
+    name: Validate release version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Match tag to pubspec
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tags must use vMAJOR.MINOR.PATCH (received: $GITHUB_REF_NAME)." >&2
+            exit 1
+          fi
+          pubspec_version="$(sed -n 's/^version:[[:space:]]*\([^+[:space:]]*\).*/\1/p' pubspec.yaml)"
+          if [[ "$version" != "$pubspec_version" ]]; then
+            echo "Tag $version does not match pubspec version $pubspec_version." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  windows:
+    name: Test and package Windows
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Build Windows release
+        run: >-
+          flutter build windows --release
+          --build-name ${{ needs.validate.outputs.version }}
+          --build-number ${{ github.run_number }}
+
+      - name: Package Windows portable build
+        shell: pwsh
+        run: |
+          $version = '${{ needs.validate.outputs.version }}'
+          $source = 'build\windows\x64\runner\Release'
+          $stage = "dist\CIA-Bridge-v$version-Windows-x64"
+          $archive = "dist\CIA-Bridge-v$version-Windows-x64.zip"
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item -Path "$source\*" -Destination $stage -Recurse -Force
+          Compress-Archive -Path "$stage\*" -DestinationPath $archive -CompressionLevel Optimal
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-windows
+          path: dist/CIA-Bridge-v${{ needs.validate.outputs.version }}-Windows-x64.zip
+          if-no-files-found: error
+
+  android:
+    name: Package signed Android APK
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Restore Android signing key
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for value in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [[ -z "${!value:-}" ]]; then
+              echo "Missing required repository secret: $value" >&2
+              exit 1
+            fi
+          done
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/cia-bridge-release.p12"
+
+      - name: Build signed Android release
+        env:
+          CIA_BRIDGE_KEYSTORE_PATH: ${{ runner.temp }}/cia-bridge-release.p12
+          CIA_BRIDGE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          CIA_BRIDGE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          CIA_BRIDGE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: >-
+          flutter build apk --release
+          --build-name ${{ needs.validate.outputs.version }}
+          --build-number ${{ github.run_number }}
+
+      - name: Stage Android package
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            "dist/CIA-Bridge-v${{ needs.validate.outputs.version }}-Android.apk"
+
+      - name: Upload Android package
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-android
+          path: dist/CIA-Bridge-v${{ needs.validate.outputs.version }}-Android.apk
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - validate
+      - windows
+      - android
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd dist
+          sha256sum CIA-Bridge-* > SHA256SUMS.txt
+
+      - name: Create or update GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --verify-tag \
+              --title "CIA Bridge $GITHUB_REF_NAME" \
+              --generate-notes
+          fi

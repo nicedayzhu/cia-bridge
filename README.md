@@ -81,6 +81,7 @@ Set `CIA_BRIDGE_FLUTTER`, `ANDROID_HOME`, and `JAVA_HOME` when the tools are not
 - [Architecture](docs/ARCHITECTURE.en.md) · [架构说明](docs/ARCHITECTURE.md)
 - [FBI Remote Install protocol](docs/FBI_PROTOCOL.en.md) · [FBI Remote Install 协议](docs/FBI_PROTOCOL.md)
 - [CIA Bridge discovery protocol](docs/DISCOVERY_PROTOCOL.md)
+- [CI and release automation](docs/RELEASING.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## Security and legal use

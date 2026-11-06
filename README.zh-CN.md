@@ -81,6 +81,7 @@ CIA Bridge 不会为了探测设备而连接 TCP/5000。FBI 会把这种连接�
 - [架构说明](docs/ARCHITECTURE.md) · [Architecture](docs/ARCHITECTURE.en.md)
 - [FBI Remote Install 协议](docs/FBI_PROTOCOL.md) · [FBI Remote Install protocol](docs/FBI_PROTOCOL.en.md)
 - [CIA Bridge 自动发现协议](docs/DISCOVERY_PROTOCOL.md)
+- [CI 与自动发布](docs/RELEASING.md)
 - [第三方组件说明](THIRD_PARTY_NOTICES.md)
 
 ## 安全与合法使用
