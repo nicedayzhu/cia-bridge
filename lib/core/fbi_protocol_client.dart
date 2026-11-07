@@ -16,7 +16,7 @@ class FbiProtocolClient {
     required void Function(FbiClientStage stage, Object? error) onStage,
   }) async {
     if (host.trim().isEmpty) throw ArgumentError('3DS IP 不能为空');
-    if (port < 1 || port > 65535) throw ArgumentError('FBI 端口无效');
+    if (port < 1 || port > 65535) throw ArgumentError('接收端口无效');
     if (urls.isEmpty) throw ArgumentError('没有可发送的 URL');
 
     _cancelled = false;
@@ -40,10 +40,12 @@ class FbiProtocolClient {
       final ack = await socket.first.timeout(const Duration(hours: 3));
       if (_cancelled) {
         onStage(FbiClientStage.cancelled, null);
-      } else if (ack.isNotEmpty) {
+      } else if (ack.isNotEmpty && ack.first == 0) {
         onStage(FbiClientStage.acknowledged, null);
+      } else if (ack.isNotEmpty) {
+        throw const SocketException('3DS 报告请求处理失败');
       } else {
-        throw const SocketException('FBI 未返回确认字节');
+        throw const SocketException('3DS 接收端未返回确认字节');
       }
     } catch (error) {
       if (_cancelled) {

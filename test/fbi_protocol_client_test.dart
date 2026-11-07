@@ -25,7 +25,7 @@ void main() {
           ).getUint32(0, Endian.big);
           if (bytes.length < 4 + length || received.isCompleted) return;
           received.complete(ascii.decode(bytes.sublist(4, 4 + length)));
-          socket.add(const [1]);
+          socket.add(const [0]);
           await socket.flush();
           await socket.close();
           if (!serverDone.isCompleted) serverDone.complete();

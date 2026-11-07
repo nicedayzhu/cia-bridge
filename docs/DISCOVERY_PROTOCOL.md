@@ -6,12 +6,22 @@ CIA Bridge uses a stateless, versioned UDP exchange to find compatible FBI
 receivers on the local IPv4 subnet. This discovery exchange is separate from,
 and does not modify, FBI's existing TCP URL-transfer protocol.
 
-| Field | Version 1 value |
+| Field | Value |
 | --- | --- |
 | Transport | UDP over IPv4 |
 | Receiver port | `5001` |
 | Request bytes | `CIA_BRIDGE_DISCOVER_V1` |
-| Response bytes | `CIA_BRIDGE_FBI_V1;tcp=5000` |
+| Install-only reply | `CIA_BRIDGE_FBI_V1;tcp=5000` |
+| Patch-capable reply | `CIA_BRIDGE_FBI_V2;cia=5000;patch=5002;codecs=raw` |
+
+A patch-capable receiver returns V2 while **Remote Install → Receive URLs over
+the network** is open. V1 remains valid for compatible install-only receivers.
+
+The `cia` and `patch` fields advertise independent control ports. The sender
+must continue using the V1 `tcp` port for regular CIA Remote Install and use
+the V2 `patch` port only for a CBPATCH1 URL. Because this unreleased protocol
+has no legacy codec requirement, CIA Bridge accepts the V2 capability only
+when `codecs` is exactly `raw`.
 
 The sender broadcasts the request as ASCII bytes without a NUL, newline, or
 length prefix. A compatible FBI instance responds by unicast to the datagram's
@@ -23,7 +33,7 @@ FBI binds the discovery endpoint only while **Remote Install → Receive URLs
 over the network** is active. It ignores malformed packets. Failure to bind UDP
 5001 does not disable the regular TCP receiver.
 
-CIA Bridge accepts only exact `V1` messages from its selected `/24` subnet. If
+CIA Bridge accepts validated `V1` or `V2` messages from its selected `/24` subnet. If
 there is no valid response, it falls back to Nintendo-MAC discovery, safe
 Android reachability candidates, and manual IP entry. This keeps stock and
 older FBI builds compatible without probing TCP/5000.
@@ -38,6 +48,9 @@ CIA Bridge 使用无状态、带版本号的 UDP 报文，在本地 IPv4 网段�
   UDP `5001`。
 - CIA Bridge 发送 ASCII 请求 `CIA_BRIDGE_DISCOVER_V1`。
 - FBI 向请求来源单播回复 `CIA_BRIDGE_FBI_V1;tcp=5000`。
+- 支持补丁的接收端在同一接收界面回复
+  `CIA_BRIDGE_FBI_V2;cia=5000;patch=5002;codecs=raw`，补丁控制端口与
+  原 CIA 安装端口彼此独立。
 - CIA Bridge 使用回复报文的来源 IP，并把 `tcp` 字段作为正常发送端口。
 - 请求或回复都不包含结尾 NUL、换行或长度字段。
 

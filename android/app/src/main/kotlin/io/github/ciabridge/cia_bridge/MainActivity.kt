@@ -14,7 +14,9 @@ import java.io.File
 import java.io.EOFException
 import java.io.IOException
 import java.io.InputStream
+import java.io.FileOutputStream
 import java.net.InetAddress
+import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -23,6 +25,7 @@ class MainActivity : FlutterActivity() {
     private lateinit var channel: MethodChannel
     private var pendingPickerResult: MethodChannel.Result? = null
     private var server: NativeLanServer? = null
+    private val patchIoExecutor = Executors.newSingleThreadExecutor()
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -30,6 +33,7 @@ class MainActivity : FlutterActivity() {
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "pickFiles" -> launchPicker(result)
+                "dataDirectory" -> result.success(filesDir.absolutePath)
                 "readFileRange" -> readFileRange(call.arguments, result)
                 "listNeighbors" -> listNeighbors(call.arguments, result)
                 "startServer" -> startServer(call.arguments, result)
@@ -45,6 +49,7 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         pendingPickerResult?.error("activity_destroyed", "The file picker was closed.", null)
         pendingPickerResult = null
+        patchIoExecutor.shutdownNow()
         super.onDestroy()
     }
 
@@ -58,10 +63,13 @@ class MainActivity : FlutterActivity() {
             pending.success(emptyList<Map<String, Any>>())
             return
         }
-        try {
-            pending.success(readPickedFiles(data))
-        } catch (error: Exception) {
-            pending.error("file_picker_failed", error.message, null)
+        patchIoExecutor.execute {
+            try {
+                val value = readPickedFiles(data)
+                runOnUiThread { pending.success(value) }
+            } catch (error: Exception) {
+                runOnUiThread { pending.error("file_picker_failed", error.message, null) }
+            }
         }
     }
 
@@ -94,7 +102,39 @@ class MainActivity : FlutterActivity() {
                 // Some providers grant access only for the current process.
             }
             val metadata = queryMetadata(uri)
-            mapOf("id" to uri.toString(), "name" to metadata.first, "size" to metadata.second)
+            if (metadata.first.lowercase().endsWith(".zip")) {
+                cachePatchArchive(uri, metadata)
+            } else {
+                mapOf("id" to uri.toString(), "name" to metadata.first, "size" to metadata.second)
+            }
+        }
+    }
+
+    private fun cachePatchArchive(
+        uri: Uri,
+        metadata: Pair<String, Long>,
+    ): Map<String, Any> {
+        require(metadata.first.lowercase().endsWith(".zip")) { "Please select a ZIP patch archive" }
+        val directory = File(cacheDir, "patch-input").apply { mkdirs() }
+        directory.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > PATCH_CACHE_MAX_AGE_MS }
+            ?.forEach { runCatching { it.delete() } }
+        val target = File(directory, "${UUID.randomUUID()}.zip")
+        try {
+            val input = contentResolver.openInputStream(uri) ?: error("Cannot open the selected ZIP")
+            input.use { source ->
+                FileOutputStream(target).use { output -> source.copyTo(output, PATCH_COPY_BUFFER_SIZE) }
+            }
+            require(target.length() == metadata.second) { "The selected ZIP was not copied completely" }
+            return mapOf(
+                "id" to uri.toString(),
+                "name" to metadata.first,
+                "size" to metadata.second,
+                "path" to target.absolutePath,
+                "temporary" to true,
+            )
+        } catch (error: Exception) {
+            target.delete()
+            throw error
         }
     }
 
@@ -338,6 +378,8 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val CHANNEL = "cia_bridge/native"
         private const val REQUEST_PICK_FILES = 7316
+        private const val PATCH_COPY_BUFFER_SIZE = 256 * 1024
+        private const val PATCH_CACHE_MAX_AGE_MS = 24L * 60 * 60 * 1000
         private const val REACHABILITY_THREADS = 32
         private const val REACHABILITY_TIMEOUT_MS = 180
         private const val REACHABILITY_SCAN_LIMIT_MS = 2200L

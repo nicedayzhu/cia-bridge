@@ -1,6 +1,7 @@
 import 'package:cia_bridge/main.dart';
 import 'package:cia_bridge/app_theme.dart';
 import 'package:cia_bridge/core/models.dart';
+import 'package:cia_bridge/core/patch_bundle.dart';
 import 'package:cia_bridge/transfer_controller.dart';
 import 'package:cia_bridge/ui/home_page.dart';
 import 'package:flutter/material.dart';
@@ -8,11 +9,16 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  if (const bool.fromEnvironment('UPDATE_GOLDENS')) {
+    autoUpdateGoldenFiles = true;
+  }
   late GoldenFileComparator previousGoldenFileComparator;
 
   setUpAll(() async {
     previousGoldenFileComparator = goldenFileComparator;
-    final localComparator = previousGoldenFileComparator as LocalFileComparator;
+    final localComparator = previousGoldenFileComparator is LocalFileComparator
+        ? previousGoldenFileComparator as LocalFileComparator
+        : LocalFileComparator(Uri.base.resolve('test/ui_preview_test.dart'));
     goldenFileComparator = _TolerantGoldenFileComparator(
       localComparator.basedir.resolve('ui_preview_test.dart'),
       precisionTolerance: 0.002,
@@ -58,12 +64,9 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final controller = TransferController()
-      ..files.add(
-        const ShareFile(id: 'preview-cia', name: '3DShell.cia', size: 1600000),
-      )
+    final controller = _readyController()
       ..phase = TransferPhase.complete
-      ..status = 'FBI 已完成本次请求，局域网服务已停止'
+      ..status = '3DS 接收端已完成本次请求，局域网服务已停止'
       ..session = const HostingSession(
         urls: ['http://192.168.0.2:8080/3DShell.cia'],
         port: 8080,
@@ -93,6 +96,126 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
   });
 
+  testWidgets('active transfer shows speed, ETA, and themed progress', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1166, 742);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final now = DateTime(2026, 11, 7, 12);
+    final controller = _readyController(now: () => now)
+      ..phase = TransferPhase.transferring
+      ..status = '正在传输 Corpse Party (USA) [原版].cia'
+      ..serverRunning = true
+      ..bytesServed = 48 * 1024 * 1024
+      ..totalBytes = 200 * 1024 * 1024
+      ..transferActive = true
+      ..transferBytesPerSecond = 3.2 * 1024 * 1024
+      ..estimatedCompletionAt = now.add(const Duration(seconds: 48))
+      ..session = const HostingSession(
+        urls: ['http://192.168.0.2:8080/corpse-party.cia'],
+        port: 8080,
+        totalBytes: 200 * 1024 * 1024,
+        usedFallbackPort: false,
+      );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: buildTheme(),
+        home: HomePage(controller: controller, initializeController: false),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(
+      find.byKey(const Key('transfer-activity-indicator')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('transfer-speed')), findsOneWidget);
+    expect(find.byKey(const Key('transfer-eta')), findsOneWidget);
+    expect(find.text('24%'), findsOneWidget);
+    expect(find.text('ETA 00:48'), findsOneWidget);
+    await expectLater(
+      find.byType(Scaffold),
+      matchesGoldenFile('goldens/transfer_active_windows.png'),
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pumpWidget(
+      MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: buildTheme(brightness: Brightness.dark),
+        home: HomePage(controller: controller, initializeController: false),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    await expectLater(
+      find.byType(Scaffold),
+      matchesGoldenFile('goldens/transfer_active_windows_dark.png'),
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    tester.view.physicalSize = const Size(360, 800);
+    await tester.pumpWidget(
+      MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: buildTheme(),
+        home: HomePage(controller: controller, initializeController: false),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const Key('transfer-speed')), findsOneWidget);
+    expect(find.byKey(const Key('transfer-eta')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+    controller.dispose();
+  });
+
+  testWidgets('failed connection offers retry before fallback actions', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(412, 915);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final controller = _readyController()
+      ..phase = TransferPhase.error
+      ..status = '连接 3DS 接收端失败，请确认接收页面仍保持打开'
+      ..serverRunning = true
+      ..session = const HostingSession(
+        urls: ['http://192.168.0.104:8080/3DShell.cia'],
+        port: 8080,
+        totalBytes: 1600000,
+        usedFallbackPort: false,
+      );
+    await tester.pumpWidget(
+      MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: buildTheme(),
+        home: HomePage(controller: controller, initializeController: false),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.byKey(const Key('retry-send-button')), findsOneWidget);
+    expect(find.text('重新连接'), findsOneWidget);
+    expect(find.text('改用二维码'), findsOneWidget);
+    expect(find.text('停止共享'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+    controller.dispose();
+  });
+
   testWidgets('ready desktop layout makes send action prominent', (
     tester,
   ) async {
@@ -113,6 +236,10 @@ void main() {
 
     expect(find.byKey(const Key('primary-send-button')), findsOneWidget);
     expect(find.text('发送到 3DS'), findsOneWidget);
+    expect(
+      find.textContaining('Receive URLs over the network'),
+      findsOneWidget,
+    );
     expect(find.text('192.168.0.103'), findsWidgets);
     await expectLater(
       find.byType(Scaffold),
@@ -147,6 +274,75 @@ void main() {
       find.byType(Scaffold),
       matchesGoldenFile('goldens/send_ready_android.png'),
     );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets(
+    'prepared patch shows user-facing details, not bundle internals',
+    (tester) async {
+      tester.view.physicalSize = const Size(412, 915);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final controller = _patchReadyController();
+      await tester.pumpWidget(
+        MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: buildTheme(),
+          home: HomePage(controller: controller, initializeController: false),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.byKey(const Key('patch-ready-card')), findsOneWidget);
+      expect(find.text('LayeredFS 补丁'), findsOneWidget);
+      expect(find.text('127 个文件'), findsOneWidget);
+      expect(find.textContaining('快速增量安装'), findsOneWidget);
+      expect(find.text('发送补丁到 3DS'), findsOneWidget);
+      expect(find.textContaining('出现提示后选择 Yes'), findsOneWidget);
+      expect(find.textContaining('.cbpatch'), findsNothing);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(seconds: 1));
+    },
+  );
+
+  testWidgets('patch preparation has a clear non-interactive progress state', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(412, 915);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const device = NearbyDevice(
+      ip: '192.168.0.103',
+      mac: '',
+      patchPort: 5002,
+      isProtocolDiscovered: true,
+    );
+    final controller = TransferController()
+      ..selectedDevice = device
+      ..targetIp = device.ip
+      ..buildingPatch = true
+      ..status = '正在打包补丁 50 / 127 · data/script.bin';
+    await tester.pumpWidget(
+      MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: buildTheme(),
+        home: HomePage(controller: controller, initializeController: false),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.byKey(const Key('patch-preparing-card')), findsOneWidget);
+    expect(find.text('正在准备 LayeredFS 补丁'), findsOneWidget);
+    expect(find.textContaining('50 / 127'), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    expect(find.text('选择文件'), findsNothing);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 1));
@@ -205,11 +401,21 @@ void main() {
     );
 
     expect(find.text('选择你的 Nintendo 3DS'), findsOneWidget);
+    expect(
+      find.byKey(const Key('select-device-button-192.168.0.103')),
+      findsOneWidget,
+    );
     await tester.tap(find.text('选择'));
     await tester.pumpAndSettle();
 
-    expect(find.text('选择要安装的文件'), findsOneWidget);
+    expect(find.text('选择要发送的文件'), findsOneWidget);
     expect(find.text('更换设备'), findsOneWidget);
+    expect(find.byKey(const Key('device-capability-notice')), findsOneWidget);
+    expect(find.text('当前不支持 LayeredFS 补丁'), findsOneWidget);
+    expect(
+      find.textContaining('请先在 3DS 上安装并打开 FBI CIA Bridge'),
+      findsOneWidget,
+    );
     expect(find.byKey(const Key('primary-send-button')), findsNothing);
 
     await tester.pumpWidget(const SizedBox.shrink());
@@ -233,7 +439,7 @@ void main() {
       ..addresses = ['192.168.0.104']
       ..selectedAddress = '192.168.0.104'
       ..devices = [candidate]
-      ..discoveryStatus = '发现 1 个在线候选；请对照 FBI 屏幕上的 IP 选择';
+      ..discoveryStatus = '发现 1 个在线候选；请对照 3DS 屏幕上的 IP 选择';
     await tester.pumpWidget(
       MaterialApp(
         debugShowCheckedModeBanner: false,
@@ -243,12 +449,12 @@ void main() {
     );
 
     expect(find.text('候选'), findsOneWidget);
-    expect(find.text('192.168.0.103 · 请与 FBI 屏幕 IP 核对'), findsOneWidget);
+    expect(find.text('192.168.0.103 · 请与 FBI 屏幕上的 IP 核对'), findsOneWidget);
     await tester.tap(find.text('选择'));
     await tester.pumpAndSettle();
 
     expect(find.text('可能的 Nintendo 3DS'), findsOneWidget);
-    expect(find.text('选择要安装的文件'), findsOneWidget);
+    expect(find.text('选择要发送的文件'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 1));
@@ -265,6 +471,7 @@ void main() {
     const receiver = NearbyDevice(
       ip: '192.168.0.103',
       mac: '',
+      patchPort: 5002,
       isProtocolDiscovered: true,
     );
     final controller = TransferController()
@@ -280,13 +487,15 @@ void main() {
       ),
     );
 
-    expect(find.text('FBI 就绪'), findsOneWidget);
-    expect(find.text('192.168.0.103:5000 · 已开启网络接收'), findsOneWidget);
+    expect(find.text('已就绪'), findsOneWidget);
+    expect(find.text('192.168.0.103 · 可接收安装文件与汉化补丁'), findsOneWidget);
     await tester.tap(find.text('选择'));
     await tester.pumpAndSettle();
 
-    expect(find.text('FBI 接收模式'), findsOneWidget);
-    expect(find.text('选择要安装的文件'), findsOneWidget);
+    expect(find.text('Nintendo 3DS'), findsOneWidget);
+    expect(find.text('选择要发送的文件'), findsOneWidget);
+    expect(find.text('已检测到 FBI CIA Bridge'), findsOneWidget);
+    expect(find.textContaining('可发送 CIA 安装文件和 LayeredFS 补丁'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 1));
@@ -429,9 +638,9 @@ class _TolerantGoldenFileComparator extends LocalFileComparator {
   }
 }
 
-TransferController _readyController() {
+TransferController _readyController({DateTime Function()? now}) {
   const device = NearbyDevice(ip: '192.168.0.103', mac: '40:D2:8A:00:00:01');
-  return TransferController()
+  return TransferController(now: now)
     ..files.add(
       const ShareFile(id: 'preview-cia', name: '3DShell.cia', size: 1600000),
     )
@@ -443,4 +652,34 @@ TransferController _readyController() {
     ..mode = TransferMode.push
     ..discoveryStatus = '发现 1 台 Nintendo 设备'
     ..status = '已选择 Nintendo 3DS · 192.168.0.103';
+}
+
+TransferController _patchReadyController() {
+  const device = NearbyDevice(
+    ip: '192.168.0.103',
+    mac: '',
+    patchPort: 5002,
+    isProtocolDiscovered: true,
+  );
+  return TransferController()
+    ..preparedPatch = const PreparedPatch(
+      file: ShareFile(
+        id: 'preview-patch',
+        name: '0004000000194200.cbpatch',
+        size: 18112000,
+      ),
+      titleId: '0004000000194200',
+      bundleId: '00112233445566778899AABBCCDDEEFF',
+      fileCount: 127,
+      rawBytes: 18108898,
+      storedBytes: 18108898,
+      romfsPath: r'D:\patch\luma\titles\0004000000194200\romfs',
+      sourceLabel: 'Corpse Party 汉化补丁',
+      temporaryDirectory: r'D:\temp\cia_bridge_patch_preview',
+    )
+    ..selectedDevice = device
+    ..targetIp = device.ip
+    ..targetPort = device.patchPort!
+    ..mode = TransferMode.push
+    ..status = '补丁已准备完成';
 }

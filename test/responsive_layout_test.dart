@@ -36,6 +36,8 @@ void main() {
 
       expect(tester.takeException(), isNull);
       expect(find.byKey(const Key('primary-send-button')), findsOneWidget);
+      expect(find.byKey(const Key('device-capability-notice')), findsOneWidget);
+      expect(find.text('当前不支持 LayeredFS 补丁'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump(const Duration(seconds: 1));

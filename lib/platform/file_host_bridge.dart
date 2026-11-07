@@ -16,6 +16,8 @@ abstract class FileHostBridge {
 
   Future<List<ShareFile>> pickFiles();
 
+  Future<String> dataDirectory();
+
   Future<Uint8List> readFileRange(
     ShareFile file, {
     required int offset,
@@ -58,6 +60,18 @@ class WindowsFileHostBridge implements FileHostBridge {
           );
         })
         .toList(growable: false);
+  }
+
+  @override
+  Future<String> dataDirectory() async {
+    final base = Platform.environment['LOCALAPPDATA'];
+    final directory = Directory(
+      base == null || base.isEmpty
+          ? '${Directory.systemTemp.path}${Platform.pathSeparator}CIA Bridge'
+          : '$base${Platform.pathSeparator}CIA Bridge',
+    );
+    await directory.create(recursive: true);
+    return directory.path;
   }
 
   @override
@@ -144,9 +158,20 @@ class AndroidFileHostBridge implements FileHostBridge {
             id: map['id'] as String,
             name: map['name'] as String,
             size: (map['size'] as num).toInt(),
+            path: map['path'] as String?,
+            deleteLocalPath: map['temporary'] as bool? ?? false,
           );
         })
         .toList(growable: false);
+  }
+
+  @override
+  Future<String> dataDirectory() async {
+    final path = await _channel.invokeMethod<String>('dataDirectory');
+    if (path == null || path.isEmpty) {
+      throw StateError('Android 没有返回应用数据目录');
+    }
+    return path;
   }
 
   @override
@@ -179,7 +204,13 @@ class AndroidFileHostBridge implements FileHostBridge {
       {
         'files': files
             .map(
-              (file) => {'id': file.id, 'name': file.name, 'size': file.size},
+              (file) => {
+                'id': file.path == null
+                    ? file.id
+                    : Uri.file(file.path!).toString(),
+                'name': file.name,
+                'size': file.size,
+              },
             )
             .toList(growable: false),
         'address': advertisedAddress,

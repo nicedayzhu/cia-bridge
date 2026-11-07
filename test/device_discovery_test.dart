@@ -16,6 +16,19 @@ void main() {
     expect(device.isProtocolDiscovered, isTrue);
   });
 
+  test('parses the patch receiver V2 ports and capabilities', () {
+    final device = parseFbiDiscoveryResponse(
+      payload: 'CIA_BRIDGE_FBI_V2;cia=5000;patch=5002;codecs=raw',
+      sourceIp: '192.168.0.103',
+      localAddress: '192.168.0.104',
+    );
+
+    expect(device, isNotNull);
+    expect(device!.port, 5000);
+    expect(device.patchPort, 5002);
+    expect(device.supportsPatch, isTrue);
+  });
+
   test('rejects malformed, local, and cross-subnet discovery replies', () {
     NearbyDevice? parse(String payload, String sourceIp) {
       return parseFbiDiscoveryResponse(
@@ -27,6 +40,13 @@ void main() {
 
     expect(parse('CIA_BRIDGE_FBI_V1;tcp=0', '192.168.0.103'), isNull);
     expect(parse('CIA_BRIDGE_FBI_V2;tcp=5000', '192.168.0.103'), isNull);
+    expect(
+      parse(
+        'CIA_BRIDGE_FBI_V2;cia=5000;patch=5002;codecs=raw,zlib',
+        '192.168.0.103',
+      ),
+      isNull,
+    );
     expect(parse('CIA_BRIDGE_FBI_V1;tcp=5000\n', '192.168.0.103'), isNull);
     expect(parse('CIA_BRIDGE_FBI_V1;tcp=5000', '192.168.0.104'), isNull);
     expect(parse('CIA_BRIDGE_FBI_V1;tcp=5000', '192.168.1.103'), isNull);

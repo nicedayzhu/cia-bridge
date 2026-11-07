@@ -14,7 +14,7 @@
 
 namespace {
 
-flutter::EncodableList PickInstallationFiles(HWND owner, HRESULT* status) {
+flutter::EncodableList PickShareFiles(HWND owner, HRESULT* status) {
   using Microsoft::WRL::ComPtr;
   flutter::EncodableList selected_files;
 
@@ -37,12 +37,12 @@ flutter::EncodableList PickInstallationFiles(HWND owner, HRESULT* status) {
   }
 
   const COMDLG_FILTERSPEC filters[] = {
-      {L"FBI installation files", L"*.cia;*.tik;*.cetk;*.3dsx"},
+      {L"Nintendo 3DS files", L"*.cia;*.tik;*.cetk;*.3dsx;*.zip"},
       {L"All files", L"*.*"},
   };
   dialog->SetFileTypes(2, filters);
   dialog->SetFileTypeIndex(1);
-  dialog->SetTitle(L"Select files to share with FBI");
+  dialog->SetTitle(L"Select installation files or a LayeredFS patch ZIP");
 
   *status = dialog->Show(owner);
   if (*status == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
@@ -174,7 +174,7 @@ bool FlutterWindow::OnCreate() {
           return;
         }
         HRESULT status = S_OK;
-        auto files = PickInstallationFiles(GetHandle(), &status);
+        auto files = PickShareFiles(GetHandle(), &status);
         if (FAILED(status)) {
           result->Error("file_dialog_failed",
                         "Windows could not open the file picker.");

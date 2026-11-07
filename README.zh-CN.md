@@ -8,22 +8,15 @@ CIA Bridge 是一款面向 Nintendo 3DS FBI Remote Install 的现代局域网投
 
 ## 主要功能
 
-- Windows 与 Android 共用一套受 LocalSend 启发的 Flutter 操作体验。
-- 清晰的两阶段流程：先选择 3DS，再选择文件并发送。
-- 配合 [CIA Bridge 版 FBI-curl](https://github.com/nicedayzhu/FBI)，精确发现已经打开网络接收的 3DS。
-- 系统允许读取邻居 MAC 时，通过 Nintendo OUI 自动识别设备。
-- 现代 Android 隐藏邻居 MAC 时，安全列出同网段在线候选设备。
-- 保留手动 IP 作为回退；FBI 默认使用 TCP 端口 `5000`。
+- Windows 与 Android 使用同一套两阶段流程：先选择 3DS，再选择文件并发送。
+- 配合 [CIA Bridge 版 FBI-curl](https://github.com/nicedayzhu/FBI) 精确发现接收状态，并保留 Nintendo OUI、Android 在线候选和手动 IP 回退。
 - 直接流式读取 Windows 文件和 Android `content://` URI，不把完整 CIA 载入内存。
-- 选择 CIA 后离线读取内嵌信息；可用时显示游戏图标、本地化名称、发行商、Title ID、版本、区域、内容类型和 New Nintendo 3DS 要求。
-- 支持二维码安装与 FBI `Receive URLs over the network` 主动推送。
-- HTTP 响应提供固定 `Content-Length`、UTF-8 文件名和单区间 Range。
-- Android 使用前台传输服务，适合大文件和退到后台后的传输。
-- Windows 是原生可执行程序，不依赖 Java 或 JRE。
+- 离线显示 CIA 图标、名称、Title ID、版本、区域和内容类型等信息。
+- 支持 `.cia`、`.tik`、`.cetk`、`.3dsx` 的 FBI 推送与二维码安装。
+- 按 Title ID 识别 LayeredFS 补丁 ZIP，采用确定性流、CRC32 校验和跳过相同内容的增量写入。
+- Android 支持前台传输；Windows 为不依赖 Java 或 JRE 的原生程序。
 
-支持 `.cia`、`.tik`、`.cetk` 和 `.3dsx` 文件。
-
-CIA 信息直接来自文件自身的 TMD 与可选 SMDH 元数据。CIA Bridge 只读取所需区间，不访问 3dsdb 或其他在线标题服务；元数据缺失或损坏时也不会阻止文件发送。
+CIA 信息来自文件的 TMD 与可选 SMDH 元数据，解析失败不会阻止发送。补丁名称优先使用内置离线目录；只有未知 Title ID 才会进行一次不影响打包和传输的可选查询。
 
 ## 下载
 
@@ -31,8 +24,8 @@ CIA 信息直接来自文件自身的 TMD 与可选 SMDH 元数据。CIA Bridge 
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
-| Windows x64 | `CIA-Bridge-v0.2.0-Windows-x64.zip` | 完整解压后运行 `cia_bridge.exe`。 |
-| Android 7.0+ | `CIA-Bridge-v0.2.0-Android.apk` | 侧载安装；从 v0.2.0 起，正式发布包使用项目固定的 release 签名证书。 |
+| Windows x64 | `CIA-Bridge-v<版本>-Windows-x64.zip` | 完整解压后运行 `cia_bridge.exe`。 |
+| Android 7.0+ | `CIA-Bridge-v<版本>-Android.apk` | 侧载安装；GitHub Release 正式包使用项目固定的 release 签名证书。 |
 
 Windows 可执行文件必须与 `data` 目录和 Flutter 运行库保持在一起，不能只复制 `.exe`。
 
@@ -52,6 +45,14 @@ Windows 可执行文件必须与 `data` 目录和 Flutter 运行库保持在一�
 2. 选择二维码安装并生成局域网二维码。
 3. 在 3DS 打开 `FBI → Remote Install → Scan QR Code`。
 4. 扫码并确认安装；FBI 下载期间保持 CIA Bridge 运行。
+
+### 流式发送 LayeredFS 汉化补丁（Windows 与 Android）
+
+1. 选择一个包含 `luma/titles/<16 位 Title ID>/romfs/...` 的 ZIP。允许外层包装目录和 README，但一次选择只能包含一个 Title ID。
+2. 在 3DS 打开 `FBI → Remote Install → Receive URLs over the network`；兼容接收端会同时公布安装与补丁端口。
+3. 在 CIA Bridge 核对游戏名、Title ID 和文件数量，发送后在 3DS 确认。
+
+接收端会保留 ZIP 未包含的旧文件，并跳过内容相同文件的 SD 写入。传输若中断，重新发送同一 ZIP 即可继续校验和修复。
 
 ## 自动发现的边界
 
@@ -79,12 +80,13 @@ CIA Bridge 不会为了探测设备而连接 TCP/5000。FBI 会把这种连接�
 
 工具不在默认位置时，可设置 `CIA_BRIDGE_FLUTTER`、`ANDROID_HOME` 和 `JAVA_HOME`。可用 `-SkipWindows` 或 `-SkipAndroid` 只构建一个平台。脚本会完成依赖解析、静态分析、测试、两个平台的 release 构建，并把结果整理到 `dist/`。
 
+本地未提供 Android 发布密钥时，脚本会把 APK 明确命名为 `CIA-Bridge-v<版本>-Android-local-test.apk`，该包仅用于测试；GitHub Release 工作流要求固定发布密钥，并生成可持续升级的正式签名包。
+
 ## 文档
 
-- [架构说明](docs/ARCHITECTURE.md) · [Architecture](docs/ARCHITECTURE.en.md)
-- [FBI Remote Install 协议](docs/FBI_PROTOCOL.md) · [FBI Remote Install protocol](docs/FBI_PROTOCOL.en.md)
-- [CIA Bridge 自动发现协议](docs/DISCOVERY_PROTOCOL.md)
-- [CI 与自动发布](docs/RELEASING.md)
+- 架构：[简体中文](docs/ARCHITECTURE.md) · [English](docs/ARCHITECTURE.en.md)
+- 协议：[FBI Remote Install](docs/FBI_PROTOCOL.md) · [设备发现](docs/DISCOVERY_PROTOCOL.md) · [CBPATCH1 补丁流](docs/PATCH_PROTOCOL.md)
+- 维护说明：[补丁性能设计](docs/PATCH_PERFORMANCE.md) · [发布流程](docs/RELEASING.md)
 - [第三方组件说明](THIRD_PARTY_NOTICES.md)
 
 ## 安全与合法使用
@@ -92,6 +94,8 @@ CIA Bridge 不会为了探测设备而连接 TCP/5000。FBI 会把这种连接�
 - 只有用户明确开始共享后，临时 HTTP 服务才会监听所选局域网 IPv4 地址。
 - 每个会话都会生成随机 URL 令牌；服务停止后链接立即失效。
 - 局域网传输使用明文 HTTP，请勿在不可信的公共网络使用。
+- 当补丁 Title ID 不在内置数据库中时，CIA Bridge 可能只把这个 Title ID
+  发送给 `api.nlib.cc` 查询显示名称；查询失败会被忽略，不会阻止本地打包或传输。
 - CIA Bridge 不提供受版权保护的软件、下载目录或资源来源，只应用于用户有权安装的内容和自制软件。
 - 当前应用界面为简体中文，项目文档提供中英文版本。
 

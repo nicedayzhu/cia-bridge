@@ -8,6 +8,7 @@ local.properties
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
+.flutter_tool_state
 .metadata
 .toolchains/
 .codebase-memory/

@@ -107,6 +107,7 @@ class ShareFile {
     required this.name,
     required this.size,
     this.path,
+    this.deleteLocalPath = false,
     this.ciaMetadata,
     this.metadataState = CiaMetadataState.notApplicable,
     this.metadataError,
@@ -116,11 +117,13 @@ class ShareFile {
   final String name;
   final int size;
   final String? path;
+  final bool deleteLocalPath;
   final CiaMetadata? ciaMetadata;
   final CiaMetadataState metadataState;
   final String? metadataError;
 
   bool get isCia => name.toLowerCase().endsWith('.cia');
+  bool get isZip => name.toLowerCase().endsWith('.zip');
 
   String get displayName => ciaMetadata?.displayTitle ?? name;
 
@@ -129,7 +132,8 @@ class ShareFile {
     return lower.endsWith('.cia') ||
         lower.endsWith('.tik') ||
         lower.endsWith('.cetk') ||
-        lower.endsWith('.3dsx');
+        lower.endsWith('.3dsx') ||
+        lower.endsWith('.zip');
   }
 
   ShareFile withCiaMetadata({
@@ -141,6 +145,7 @@ class ShareFile {
     name: name,
     size: size,
     path: path,
+    deleteLocalPath: deleteLocalPath,
     ciaMetadata: metadata,
     metadataState: state,
     metadataError: error,
@@ -164,6 +169,7 @@ class NearbyDevice {
     required this.ip,
     required this.mac,
     this.port = 5000,
+    this.patchPort,
     this.isManual = false,
     this.isCandidate = false,
     this.isProtocolDiscovered = false,
@@ -172,13 +178,15 @@ class NearbyDevice {
   final String ip;
   final String mac;
   final int port;
+  final int? patchPort;
   final bool isManual;
   final bool isCandidate;
   final bool isProtocolDiscovered;
 
+  bool get supportsPatch => patchPort != null;
+
   String get name {
-    if (isManual) return '手动添加的 3DS';
-    if (isProtocolDiscovered) return 'FBI 接收模式';
+    if (isManual) return '手动添加的 Nintendo 3DS';
     if (isCandidate) return '可能的 Nintendo 3DS';
     return 'Nintendo 3DS';
   }

@@ -43,7 +43,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     super.initState();
     _stage =
         controller.session != null ||
-            (controller.selectedDevice != null && controller.files.isNotEmpty)
+            (controller.selectedDevice != null &&
+                (controller.selectedFiles.isNotEmpty ||
+                    controller.buildingPatch))
         ? _FlowStage.files
         : _FlowStage.device;
     WidgetsBinding.instance.addObserver(this);
@@ -65,7 +67,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     controller.addListener(_refresh);
     _stage =
         controller.session != null ||
-            (controller.selectedDevice != null && controller.files.isNotEmpty)
+            (controller.selectedDevice != null &&
+                (controller.selectedFiles.isNotEmpty ||
+                    controller.buildingPatch))
         ? _FlowStage.files
         : _FlowStage.device;
     if (widget.initializeController) {
@@ -187,7 +191,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _sendSelectedDevice() async {
     try {
-      if (controller.files.isEmpty) throw StateError('请先选择要发送的 CIA 文件');
+      if (controller.selectedFiles.isEmpty) {
+        throw StateError('请先选择要发送的安装文件或 LayeredFS 补丁');
+      }
       final device = controller.selectedDevice;
       if (device == null) throw StateError('请先选择一台附近的 3DS');
       controller.selectDevice(device);
@@ -217,56 +223,93 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _showManualDevice() async {
     final ip = TextEditingController(text: controller.targetIp);
     final port = TextEditingController(text: '${controller.targetPort}');
+    final patchPort = TextEditingController(text: '5002');
+    var supportsPatch = false;
     final added = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('手动添加 3DS'),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '在 FBI 中打开 “Receive URLs over the network”，然后输入屏幕显示的 IP。',
-                style: TextStyle(color: context.mutedColor, height: 1.45),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('手动添加 3DS'),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '在 3DS 的 FBI 中打开 “Remote Install / Receive URLs over the network”，然后输入屏幕显示的 IP。',
+                    style: TextStyle(color: context.mutedColor, height: 1.45),
+                  ),
+                  const SizedBox(height: 18),
+                  TextField(
+                    controller: ip,
+                    autofocus: true,
+                    keyboardType: TextInputType.url,
+                    decoration: const InputDecoration(
+                      labelText: '3DS IP',
+                      hintText: '192.168.1.35',
+                      prefixIcon: Icon(Icons.videogame_asset_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: port,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(
+                      labelText: '安装文件端口',
+                      helperText: '默认 5000',
+                      prefixIcon: Icon(Icons.lan_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: context.softSurface,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: SwitchListTile(
+                      contentPadding: const EdgeInsets.fromLTRB(14, 3, 8, 3),
+                      value: supportsPatch,
+                      onChanged: (value) =>
+                          setDialogState(() => supportsPatch = value),
+                      title: const Text(
+                        'FBI CIA Bridge 补丁接收',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      subtitle: const Text('仅在 3DS 已安装 CIA Bridge 版 FBI 时开启'),
+                    ),
+                  ),
+                  if (supportsPatch) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: patchPort,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      decoration: const InputDecoration(
+                        labelText: 'LayeredFS 补丁端口',
+                        helperText: '默认 5002',
+                        prefixIcon: Icon(Icons.extension_outlined),
+                      ),
+                    ),
+                  ],
+                ],
               ),
-              const SizedBox(height: 18),
-              TextField(
-                controller: ip,
-                autofocus: true,
-                keyboardType: TextInputType.url,
-                decoration: const InputDecoration(
-                  labelText: '3DS IP',
-                  hintText: '192.168.1.35',
-                  prefixIcon: Icon(Icons.videogame_asset_outlined),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: port,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(
-                  labelText: 'FBI 端口',
-                  helperText: '默认 5000',
-                  prefixIcon: Icon(Icons.lan_outlined),
-                ),
-              ),
-            ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('取消'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+              label: const Text('继续'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('取消'),
-          ),
-          FilledButton.icon(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            icon: const Icon(Icons.arrow_forward_rounded, size: 18),
-            label: const Text('继续'),
-          ),
-        ],
       ),
     );
     if (added == true) {
@@ -274,6 +317,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         controller.addManualDevice(
           ip.text,
           port: int.tryParse(port.text) ?? 5000,
+          patchPort: supportsPatch
+              ? int.tryParse(patchPort.text) ?? 5002
+              : null,
         );
         if (mounted && controller.selectedDevice != null) {
           setState(() => _stage = _FlowStage.files);
@@ -284,6 +330,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
     ip.dispose();
     port.dispose();
+    patchPort.dispose();
   }
 
   Future<void> _showNetworkSettings() async {
@@ -393,11 +440,32 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void _showError(Object error) {
     if (!mounted) return;
     final message = error.toString().replaceFirst(
-      RegExp(r'^(StateError|ArgumentError|PlatformException)[:(]\s*'),
+      RegExp(
+        r'^(StateError|ArgumentError|FormatException|FileSystemException|UnsupportedError|SocketException|PlatformException)[:(]\s*',
+      ),
       '',
     );
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 6),
+          content: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.error_outline_rounded, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(child: Text(message)),
+            ],
+          ),
+          action: SnackBarAction(
+            label: '知道了',
+            textColor: Colors.white,
+            onPressed: messenger.hideCurrentSnackBar,
+          ),
+        ),
+      );
   }
 }
 
@@ -419,22 +487,17 @@ class _TopBar extends StatelessWidget {
       color: theme.colorScheme.surface,
       child: SafeArea(
         bottom: false,
-        child: Container(
-          height: 70,
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(color: theme.colorScheme.outline),
-            ),
-          ),
+        child: SizedBox(
+          height: 64,
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 1120),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 18),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Row(
                   children: [
-                    const GameBridgeLogo(size: 40),
-                    const SizedBox(width: 11),
+                    const GameBridgeLogo(size: 38),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: LayoutBuilder(
                         builder: (context, constraints) {
@@ -448,8 +511,8 @@ class _TopBar extends StatelessWidget {
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   fontSize: 17,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: -0.25,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -0.15,
                                 ),
                               ),
                               if (constraints.maxWidth > 220)
@@ -459,7 +522,7 @@ class _TopBar extends StatelessWidget {
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                     color: context.mutedColor,
-                                    fontSize: 10.5,
+                                    fontSize: 11,
                                   ),
                                 ),
                             ],
@@ -472,10 +535,10 @@ class _TopBar extends StatelessWidget {
                       onChanged: onThemeModeChanged,
                     ),
                     const SizedBox(width: 4),
-                    IconButton(
+                    IconButton.filledTonal(
                       tooltip: '网络设置',
                       onPressed: onNetworkSettings,
-                      icon: const Icon(Icons.tune_rounded),
+                      icon: const Icon(Icons.tune_rounded, size: 20),
                     ),
                   ],
                 ),
@@ -566,7 +629,7 @@ class _DeviceStage extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return ListView(
-      padding: const EdgeInsets.fromLTRB(18, 28, 18, 42),
+      padding: const EdgeInsets.fromLTRB(18, 24, 18, 42),
       children: [
         Center(
           child: ConstrainedBox(
@@ -575,60 +638,53 @@ class _DeviceStage extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const _FlowProgress(stage: _FlowStage.device),
-                const SizedBox(height: 34),
-                Center(
-                  child: Container(
-                    width: 94,
-                    height: 94,
-                    padding: const EdgeInsets.all(17),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          theme.colorScheme.secondary.withValues(alpha: 0.18),
-                          theme.colorScheme.primary.withValues(alpha: 0.18),
+                const SizedBox(height: 28),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 52,
+                      height: 52,
+                      padding: const EdgeInsets.all(11),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Nintendo3dsGlyph(
+                        size: 30,
+                        bodyColor: theme.colorScheme.onPrimaryContainer,
+                        screenColor: theme.colorScheme.primary,
+                        detailColor: theme.colorScheme.secondary,
+                      ),
+                    ),
+                    const SizedBox(width: 15),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '选择你的 Nintendo 3DS',
+                            style: theme.textTheme.headlineSmall,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '在 3DS 上打开 FBI / Remote Install / Receive URLs over the network',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: context.mutedColor,
+                              height: 1.4,
+                            ),
+                          ),
                         ],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.circular(30),
-                      border: Border.all(
-                        color: theme.colorScheme.primary.withValues(
-                          alpha: 0.25,
-                        ),
                       ),
                     ),
-                    child: Nintendo3dsGlyph(
-                      size: 60,
-                      bodyColor: theme.colorScheme.onSurface,
-                      screenColor: AppColors.cyan,
-                      detailColor: theme.colorScheme.secondary,
-                    ),
-                  ),
+                  ],
                 ),
-                const SizedBox(height: 20),
-                Text(
-                  '选择你的 Nintendo 3DS',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '在 FBI → Remote Install 中打开 “Receive URLs over the network”',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: context.mutedColor,
-                    height: 1.45,
-                  ),
-                ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 22),
                 _DiscoveryBar(
                   controller: controller,
                   onManualDevice: onManualDevice,
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 12),
                 if (controller.devices.isEmpty)
                   _DeviceEmptyState(scanning: controller.scanningDevices)
                 else
@@ -659,11 +715,10 @@ class _DiscoveryBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 11, 11, 11),
+      padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: theme.colorScheme.outline),
+        color: theme.colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(14),
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -705,7 +760,7 @@ class _DiscoveryBar extends StatelessWidget {
                         dimension: 15,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.radar_rounded, size: 18),
+                    : const Icon(Icons.refresh_rounded, size: 18),
                 label: Text(controller.scanningDevices ? '扫描中' : '重新扫描'),
               ),
               TextButton.icon(
@@ -748,34 +803,31 @@ class _DeviceChoiceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Material(
-      color: theme.colorScheme.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(19),
-        side: BorderSide(color: theme.colorScheme.outline),
-      ),
+      color: theme.colorScheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
             children: [
               Container(
-                width: 58,
-                height: 58,
-                padding: const EdgeInsets.all(10),
+                width: 46,
+                height: 46,
+                padding: const EdgeInsets.all(9),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(18),
+                  color: theme.colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: Nintendo3dsGlyph(
-                  size: 38,
-                  bodyColor: theme.colorScheme.onSurface,
-                  screenColor: AppColors.cyan,
+                  size: 28,
+                  bodyColor: theme.colorScheme.onPrimaryContainer,
+                  screenColor: theme.colorScheme.primary,
                   detailColor: theme.colorScheme.secondary,
                 ),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 13),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -788,7 +840,7 @@ class _DeviceChoiceCard extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              fontWeight: FontWeight.w900,
+                              fontWeight: FontWeight.w700,
                               fontSize: 15,
                             ),
                           ),
@@ -798,7 +850,7 @@ class _DeviceChoiceCard extends StatelessWidget {
                           _MiniBadge(label: '手动'),
                         ] else if (device.isProtocolDiscovered) ...[
                           const SizedBox(width: 8),
-                          _MiniBadge(label: 'FBI 就绪'),
+                          _MiniBadge(label: '已就绪'),
                         ] else if (device.isCandidate) ...[
                           const SizedBox(width: 8),
                           _MiniBadge(label: '候选'),
@@ -808,9 +860,11 @@ class _DeviceChoiceCard extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       device.isProtocolDiscovered
-                          ? '${device.ip}:${device.port} · 已开启网络接收'
+                          ? device.supportsPatch
+                                ? '${device.ip} · 可接收安装文件与汉化补丁'
+                                : '${device.ip} · 普通 FBI，仅支持 CIA 安装'
                           : device.isCandidate
-                          ? '${device.ip} · 请与 FBI 屏幕 IP 核对'
+                          ? '${device.ip} · 请与 FBI 屏幕上的 IP 核对'
                           : device.ip,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -819,33 +873,16 @@ class _DeviceChoiceCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 12),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.13),
-                  borderRadius: BorderRadius.circular(99),
-                ),
-                child: Row(
+              const SizedBox(width: 8),
+              TextButton(
+                key: Key('select-device-button-${device.ip}'),
+                onPressed: onTap,
+                child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      '选择',
-                      style: TextStyle(
-                        color: theme.colorScheme.primary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(width: 3),
-                    Icon(
-                      Icons.arrow_forward_rounded,
-                      size: 15,
-                      color: theme.colorScheme.primary,
-                    ),
+                    Text('选择'),
+                    SizedBox(width: 2),
+                    Icon(Icons.chevron_right_rounded, size: 18),
                   ],
                 ),
               ),
@@ -950,14 +987,20 @@ class _FilesStage extends StatelessWidget {
                 const SizedBox(height: 28),
                 _SelectedDeviceSummary(
                   device: controller.selectedDevice,
-                  enabled: !controller.serverRunning,
+                  enabled:
+                      !controller.serverRunning && !controller.buildingPatch,
                   onChangeDevice: onChangeDevice,
                 ),
+                if (!hasSession && controller.selectedDevice != null) ...[
+                  const SizedBox(height: 12),
+                  _DeviceCapabilityNotice(device: controller.selectedDevice!),
+                ],
                 const SizedBox(height: 28),
                 if (hasSession)
                   TransferPanel(
                     controller: controller,
                     onStop: onStop,
+                    onRetry: onSend,
                     onContinue: () => controller.finishResult(),
                     onClear: () =>
                         controller.finishResult(clearSelection: true),
@@ -968,7 +1011,7 @@ class _FilesStage extends StatelessWidget {
                     controller: controller,
                     onPickFiles: onPickFiles,
                   ),
-                  if (controller.files.isNotEmpty) ...[
+                  if (controller.selectedFiles.isNotEmpty) ...[
                     const SizedBox(height: 20),
                     _SendConfirmation(
                       controller: controller,
@@ -1001,28 +1044,25 @@ class _SelectedDeviceSummary extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
       decoration: BoxDecoration(
-        color: theme.colorScheme.primary.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(19),
-        border: Border.all(
-          color: theme.colorScheme.primary.withValues(alpha: 0.25),
-        ),
+        color: theme.colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
         children: [
           Container(
-            width: 50,
-            height: 50,
-            padding: const EdgeInsets.all(9),
+            width: 44,
+            height: 44,
+            padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: theme.colorScheme.surface,
-              borderRadius: BorderRadius.circular(15),
+              color: theme.colorScheme.primaryContainer,
+              borderRadius: BorderRadius.circular(11),
             ),
             child: Nintendo3dsGlyph(
-              size: 32,
-              bodyColor: theme.colorScheme.onSurface,
-              screenColor: AppColors.cyan,
+              size: 28,
+              bodyColor: theme.colorScheme.onPrimaryContainer,
+              screenColor: theme.colorScheme.primary,
               detailColor: theme.colorScheme.secondary,
             ),
           ),
@@ -1033,7 +1073,7 @@ class _SelectedDeviceSummary extends StatelessWidget {
               children: [
                 Text(
                   device?.name ?? 'Nintendo 3DS',
-                  style: const TextStyle(fontWeight: FontWeight.w900),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 3),
                 Text(
@@ -1043,10 +1083,63 @@ class _SelectedDeviceSummary extends StatelessWidget {
               ],
             ),
           ),
-          TextButton.icon(
+          TextButton(
             onPressed: enabled ? onChangeDevice : null,
-            icon: const Icon(Icons.swap_horiz_rounded, size: 18),
-            label: const Text('更换设备'),
+            child: const Text('更换设备'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DeviceCapabilityNotice extends StatelessWidget {
+  const _DeviceCapabilityNotice({required this.device});
+
+  final NearbyDevice device;
+
+  @override
+  Widget build(BuildContext context) {
+    final supported = device.supportsPatch;
+    final color = supported ? AppColors.success : AppColors.warning;
+    return Container(
+      key: const Key('device-capability-notice'),
+      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 13),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            supported ? Icons.verified_rounded : Icons.info_outline_rounded,
+            color: color,
+            size: 22,
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  supported ? '已检测到 FBI CIA Bridge' : '当前不支持 LayeredFS 补丁',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  supported
+                      ? '可发送 CIA 安装文件和 LayeredFS 补丁；补丁会自动使用快速增量传输。'
+                      : '仍可发送 CIA、TIK、CETK、3DSX 安装文件；如需发送 LayeredFS 补丁，'
+                            '请先在 3DS 上安装并打开 FBI CIA Bridge。',
+                  style: TextStyle(
+                    color: context.mutedColor,
+                    fontSize: 12.5,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1070,20 +1163,24 @@ class _FileSelectionArea extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          '选择要安装的文件',
+          '选择要发送的文件',
           style: theme.textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w900,
+            fontWeight: FontWeight.w700,
             letterSpacing: -0.35,
           ),
         ),
         const SizedBox(height: 6),
         Text(
-          '支持 CIA、TIK、CETK 和 3DSX',
+          controller.selectedDevice?.supportsPatch == true
+              ? '自动识别 CIA、TIK、CETK、3DSX 安装文件和 LayeredFS 补丁 ZIP'
+              : '当前接收端仅支持 CIA、TIK、CETK、3DSX 安装文件',
           style: TextStyle(color: context.mutedColor, fontSize: 12.5),
         ),
         const SizedBox(height: 14),
         Card(
-          child: controller.files.isEmpty
+          child: controller.buildingPatch
+              ? _PatchPreparingState(status: controller.status)
+              : controller.selectedFiles.isEmpty
               ? _EmptyFilePicker(onPickFiles: onPickFiles)
               : _SelectedFiles(
                   controller: controller,
@@ -1109,14 +1206,17 @@ class _EmptyFilePicker extends StatelessWidget {
         builder: (context, constraints) {
           final compact = constraints.maxWidth < 520;
           final icon = Container(
-            width: 72,
-            height: 72,
-            padding: const EdgeInsets.all(14),
+            width: 56,
+            height: 56,
             decoration: BoxDecoration(
-              color: theme.colorScheme.secondary.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(22),
+              color: theme.colorScheme.secondaryContainer,
+              borderRadius: BorderRadius.circular(14),
             ),
-            child: const CiaCartridgeGlyph(size: 44),
+            child: Icon(
+              Icons.folder_zip_outlined,
+              color: theme.colorScheme.onSecondaryContainer,
+              size: 28,
+            ),
           );
           final copy = Column(
             crossAxisAlignment: compact
@@ -1124,15 +1224,15 @@ class _EmptyFilePicker extends StatelessWidget {
                 : CrossAxisAlignment.start,
             children: [
               Text(
-                '从这台设备选择 CIA',
+                '选择文件，软件会自动识别',
                 textAlign: compact ? TextAlign.center : TextAlign.start,
                 style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
               const SizedBox(height: 5),
               Text(
-                '文件只会在局域网内临时共享，不会上传到公网。',
+                '安装文件会由 3DS 接收端安装；含 luma/titles/<Title ID>/romfs 的 ZIP 会自动作为汉化补丁处理。',
                 textAlign: compact ? TextAlign.center : TextAlign.start,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: context.mutedColor,
@@ -1141,10 +1241,17 @@ class _EmptyFilePicker extends StatelessWidget {
               ),
             ],
           );
-          final button = FilledButton.icon(
-            onPressed: () => onPickFiles(),
-            icon: const Icon(Icons.add_rounded, size: 19),
-            label: const Text('选择 CIA 文件'),
+          final buttons = Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            alignment: compact ? WrapAlignment.center : WrapAlignment.end,
+            children: [
+              FilledButton.icon(
+                onPressed: () => onPickFiles(),
+                icon: const Icon(Icons.add_rounded, size: 19),
+                label: const Text('选择文件'),
+              ),
+            ],
           );
           if (compact) {
             return Column(
@@ -1154,20 +1261,82 @@ class _EmptyFilePicker extends StatelessWidget {
                 const SizedBox(height: 16),
                 copy,
                 const SizedBox(height: 20),
-                button,
+                buttons,
               ],
             );
           }
           return Row(
             children: [
               icon,
-              const SizedBox(width: 18),
+              const SizedBox(width: 16),
               Expanded(child: copy),
               const SizedBox(width: 18),
-              button,
+              buttons,
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _PatchPreparingState extends StatelessWidget {
+  const _PatchPreparingState({required this.status});
+
+  final String status;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      key: const Key('patch-preparing-card'),
+      padding: const EdgeInsets.all(22),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.secondary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(
+              Icons.folder_zip_outlined,
+              color: theme.colorScheme.secondary,
+            ),
+          ),
+          const SizedBox(width: 15),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '正在准备 LayeredFS 补丁',
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  status,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: context.mutedColor,
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const LinearProgressIndicator(),
+                const SizedBox(height: 8),
+                Text(
+                  '正在校验并转换文件，请保持应用打开。',
+                  style: TextStyle(color: context.mutedColor, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1181,6 +1350,9 @@ class _SelectedFiles extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (controller.isPatchMode) {
+      return _SelectedPatch(controller: controller, onPickFiles: onPickFiles);
+    }
     final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 15, 16, 16),
@@ -1224,15 +1396,145 @@ class _SelectedFiles extends StatelessWidget {
             height: 100,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              itemCount: controller.files.length,
+              itemCount: controller.selectedFiles.length,
               separatorBuilder: (_, _) => const SizedBox(width: 10),
               itemBuilder: (context, index) {
-                final file = controller.files[index];
+                final file = controller.selectedFiles[index];
                 return _FileChip(
                   file: file,
                   onRemove: () => controller.removeFile(file),
                 );
               },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SelectedPatch extends StatelessWidget {
+  const _SelectedPatch({required this.controller, required this.onPickFiles});
+
+  final TransferController controller;
+  final Future<void> Function() onPickFiles;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final patch = controller.preparedPatch!;
+    return Padding(
+      key: const Key('patch-ready-card'),
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.secondary.withValues(alpha: 0.13),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(
+                  Icons.extension_rounded,
+                  color: theme.colorScheme.secondary,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const _MiniBadge(label: 'LayeredFS 补丁'),
+                    const SizedBox(height: 6),
+                    Text(
+                      controller.patchDisplayName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      controller.patchInfoLine,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: context.mutedColor,
+                        fontSize: 11.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                onPressed: controller.clearFiles,
+                tooltip: '移除补丁',
+                icon: const Icon(Icons.close_rounded, size: 20),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 14,
+            runSpacing: 6,
+            children: [
+              Text(
+                '${patch.fileCount} 个文件',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              Text(
+                formatBytes(patch.rawBytes),
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              Text(
+                '来源：${patch.sourceLabel}',
+                style: TextStyle(color: context.mutedColor),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.success.withValues(alpha: 0.09),
+              borderRadius: BorderRadius.circular(13),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.bolt_rounded,
+                  color: AppColors.success,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '快速增量安装：3DS 会跳过内容相同的文件，只写入变化内容。',
+                    style: TextStyle(
+                      color: context.mutedColor,
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerRight,
+            child: OutlinedButton.icon(
+              onPressed: () => onPickFiles(),
+              icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+              label: const Text('重新选择补丁'),
             ),
           ),
         ],
@@ -1347,14 +1649,21 @@ class _FileArtwork extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final bytes = file.ciaMetadata?.iconPng;
-    final fallback = Center(child: CiaCartridgeGlyph(size: size * 0.58));
+    final fallback = Center(
+      child: Icon(
+        Icons.description_outlined,
+        size: size * 0.46,
+        color: theme.colorScheme.secondary,
+      ),
+    );
     return Container(
       width: size,
       height: size,
       padding: bytes == null ? EdgeInsets.all(size * 0.16) : EdgeInsets.zero,
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.secondary.withValues(alpha: 0.13),
+        color: theme.colorScheme.secondary.withValues(alpha: 0.13),
         borderRadius: BorderRadius.circular(14),
       ),
       clipBehavior: Clip.antiAlias,
@@ -1528,18 +1837,10 @@ class _SendConfirmation extends StatelessWidget {
     final theme = Theme.of(context);
     final device = controller.selectedDevice;
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Color.alphaBlend(
-          theme.colorScheme.primary.withValues(
-            alpha: theme.brightness == Brightness.dark ? 0.11 : 0.06,
-          ),
-          theme.colorScheme.surface,
-        ),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: theme.colorScheme.primary.withValues(alpha: 0.28),
-        ),
+        color: theme.colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -1547,17 +1848,17 @@ class _SendConfirmation extends StatelessWidget {
           final summary = Row(
             children: [
               Container(
-                width: 54,
-                height: 54,
-                padding: const EdgeInsets.all(10),
+                width: 46,
+                height: 46,
+                padding: const EdgeInsets.all(9),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.surface,
-                  borderRadius: BorderRadius.circular(17),
+                  color: theme.colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: Nintendo3dsGlyph(
-                  size: 34,
-                  bodyColor: theme.colorScheme.onSurface,
-                  screenColor: AppColors.cyan,
+                  size: 28,
+                  bodyColor: theme.colorScheme.onPrimaryContainer,
+                  screenColor: theme.colorScheme.primary,
                   detailColor: theme.colorScheme.secondary,
                 ),
               ),
@@ -1570,16 +1871,36 @@ class _SendConfirmation extends StatelessWidget {
                       '准备发送到 ${device?.name ?? 'Nintendo 3DS'}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w900),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      '${controller.files.length} 个文件 · ${formatBytes(controller.selectedBytes)} · ${device?.ip ?? ''}',
-                      maxLines: 1,
+                      controller.isPatchMode
+                          ? '${controller.patchDisplayName} · '
+                                '${controller.preparedPatch!.fileCount} 个文件 · '
+                                '${formatBytes(controller.preparedPatch!.rawBytes)} · '
+                                '${device?.ip ?? ''}'
+                          : '${controller.files.length} 个文件 · ${formatBytes(controller.selectedBytes)} · ${device?.ip ?? ''}',
+                      maxLines: controller.isPatchMode ? 2 : 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: context.mutedColor,
                         fontSize: 11.5,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      controller.isPatchMode
+                          ? '请保持 FBI / Remote Install / Receive URLs over the network 打开；'
+                                '出现提示后选择 Yes，补丁会直接写入 LayeredFS。'
+                          : '请保持 FBI / Remote Install / Receive URLs over the network 打开；'
+                                '发送后在 3DS 上确认安装。',
+                      maxLines: compact ? 3 : 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: context.mutedColor,
+                        fontSize: 11,
+                        height: 1.35,
                       ),
                     ),
                   ],
@@ -1591,27 +1912,37 @@ class _SendConfirmation extends StatelessWidget {
               ? Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _PrimarySendButton(onTap: onSend),
-                    const SizedBox(height: 9),
-                    OutlinedButton.icon(
-                      onPressed: () => onQr(),
-                      icon: const Icon(Icons.qr_code_2_rounded, size: 19),
-                      label: const Text('改用二维码安装'),
+                    _PrimarySendButton(
+                      onTap: onSend,
+                      label: controller.isPatchMode ? '发送补丁到 3DS' : '发送到 3DS',
                     ),
+                    if (!controller.isPatchMode) ...[
+                      const SizedBox(height: 9),
+                      OutlinedButton.icon(
+                        onPressed: () => onQr(),
+                        icon: const Icon(Icons.qr_code_2_rounded, size: 19),
+                        label: const Text('改用二维码安装'),
+                      ),
+                    ],
                   ],
                 )
               : Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    OutlinedButton.icon(
-                      onPressed: () => onQr(),
-                      icon: const Icon(Icons.qr_code_2_rounded, size: 19),
-                      label: const Text('二维码'),
-                    ),
-                    const SizedBox(width: 10),
+                    if (!controller.isPatchMode) ...[
+                      OutlinedButton.icon(
+                        onPressed: () => onQr(),
+                        icon: const Icon(Icons.qr_code_2_rounded, size: 19),
+                        label: const Text('二维码'),
+                      ),
+                      const SizedBox(width: 10),
+                    ],
                     SizedBox(
                       width: 270,
-                      child: _PrimarySendButton(onTap: onSend),
+                      child: _PrimarySendButton(
+                        onTap: onSend,
+                        label: controller.isPatchMode ? '发送补丁到 3DS' : '发送到 3DS',
+                      ),
                     ),
                   ],
                 );
@@ -1635,65 +1966,19 @@ class _SendConfirmation extends StatelessWidget {
 }
 
 class _PrimarySendButton extends StatelessWidget {
-  const _PrimarySendButton({required this.onTap});
+  const _PrimarySendButton({required this.onTap, required this.label});
 
   final Future<void> Function() onTap;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
-    final radius = BorderRadius.circular(16);
-    return Semantics(
-      button: true,
-      label: '发送到 Nintendo 3DS',
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: radius,
-        child: Ink(
-          height: 56,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF4F67F1), Color(0xFF35BFA8)],
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-            ),
-            borderRadius: radius,
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.cyan.withValues(alpha: 0.22),
-                blurRadius: 18,
-                offset: const Offset(0, 7),
-              ),
-            ],
-          ),
-          child: InkWell(
-            key: const Key('primary-send-button'),
-            onTap: () => onTap(),
-            borderRadius: radius,
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 18),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.send_rounded, color: Colors.white, size: 21),
-                  SizedBox(width: 10),
-                  Flexible(
-                    child: Text(
-                      '发送到 3DS',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
+    return FilledButton.icon(
+      key: const Key('primary-send-button'),
+      onPressed: () => onTap(),
+      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
+      icon: const Icon(Icons.send_rounded, size: 20),
+      label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
     );
   }
 }
@@ -1706,106 +1991,46 @@ class _FlowProgress extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final deviceDone = stage == _FlowStage.files;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = constraints.maxWidth < 340;
-        return Center(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+    final selectingDevice = stage == _FlowStage.device;
+    return Semantics(
+      label: selectingDevice ? '第 1 步，共 2 步：选择 3DS' : '第 2 步，共 2 步：选择文件并发送',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
             children: [
-              _FlowNode(
-                number: 1,
-                label: '选择 3DS',
-                active: stage == _FlowStage.device,
-                done: deviceDone,
-                compact: compact,
+              Expanded(
+                child: Text(
+                  selectingDevice ? '选择 3DS' : '选择文件并发送',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ),
-              Container(
-                width: compact ? 24 : 46,
-                height: 1.5,
-                margin: EdgeInsets.symmetric(horizontal: compact ? 5 : 9),
-                color: deviceDone
-                    ? AppColors.success
-                    : theme.colorScheme.outline,
-              ),
-              _FlowNode(
-                number: 2,
-                label: '选择文件并发送',
-                active: stage == _FlowStage.files,
-                done: false,
-                compact: compact,
+              Text(
+                selectingDevice ? '1 / 2' : '2 / 2',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: context.mutedColor,
+                ),
               ),
             ],
           ),
-        );
-      },
-    );
-  }
-}
-
-class _FlowNode extends StatelessWidget {
-  const _FlowNode({
-    required this.number,
-    required this.label,
-    required this.active,
-    required this.done,
-    this.compact = false,
-  });
-
-  final int number;
-  final String label;
-  final bool active;
-  final bool done;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final color = done ? AppColors.success : theme.colorScheme.primary;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          width: compact ? 24 : 26,
-          height: compact ? 24 : 26,
-          decoration: BoxDecoration(
-            color: done
-                ? AppColors.success
-                : active
-                ? color.withValues(alpha: 0.14)
-                : context.softSurface,
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: active || done ? color : theme.colorScheme.outline,
+          const SizedBox(height: 9),
+          Container(
+            height: 4,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            clipBehavior: Clip.antiAlias,
+            alignment: Alignment.centerLeft,
+            child: FractionallySizedBox(
+              widthFactor: selectingDevice ? 0.5 : 1,
+              child: ColoredBox(color: theme.colorScheme.primary),
             ),
           ),
-          child: Center(
-            child: done
-                ? const Icon(Icons.check_rounded, size: 15, color: Colors.white)
-                : Text(
-                    '$number',
-                    style: TextStyle(
-                      color: active ? color : context.mutedColor,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-          ),
-        ),
-        SizedBox(width: compact ? 5 : 7),
-        Text(
-          label,
-          style: TextStyle(
-            color: active || done
-                ? theme.colorScheme.onSurface
-                : context.mutedColor,
-            fontSize: compact ? 11 : 12,
-            fontWeight: active || done ? FontWeight.w800 : FontWeight.w600,
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

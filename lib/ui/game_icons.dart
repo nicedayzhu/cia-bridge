@@ -12,24 +12,24 @@ class GameBridgeLogo extends StatelessWidget {
     return Container(
       width: size,
       height: size,
-      padding: EdgeInsets.all(size * 0.17),
+      padding: EdgeInsets.all(size * 0.18),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [AppColors.blue, AppColors.cyan],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(size * 0.3),
+        color: AppColors.blue,
+        borderRadius: BorderRadius.circular(size * 0.26),
       ),
       child: const Nintendo3dsGlyph(
         bodyColor: Colors.white,
-        screenColor: Color(0xFF5169C7),
+        screenColor: Colors.white,
         detailColor: Colors.white,
       ),
     );
   }
 }
 
+/// A compact front-view 3DS glyph.
+///
+/// Its proportions follow the public Simple Icons Nintendo 3DS artwork while
+/// the reduced, stroke-based rendering stays legible at application-icon size.
 class Nintendo3dsGlyph extends StatelessWidget {
   const Nintendo3dsGlyph({
     super.key,
@@ -62,35 +62,6 @@ class Nintendo3dsGlyph extends StatelessWidget {
   }
 }
 
-class CiaCartridgeGlyph extends StatelessWidget {
-  const CiaCartridgeGlyph({
-    super.key,
-    this.size = 40,
-    this.bodyColor = AppColors.blue,
-    this.labelColor = Colors.white,
-  });
-
-  final double size;
-  final Color bodyColor;
-  final Color labelColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      label: 'CIA 安装文件',
-      child: SizedBox.square(
-        dimension: size,
-        child: CustomPaint(
-          painter: _CiaCartridgePainter(
-            bodyColor: bodyColor,
-            labelColor: labelColor,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _Nintendo3dsPainter extends CustomPainter {
   const _Nintendo3dsPainter({
     required this.bodyColor,
@@ -104,89 +75,66 @@ class _Nintendo3dsPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final width = size.width;
-    final height = size.height;
-    final body = Paint()
+    final scale = size.shortestSide / 24;
+    canvas.save();
+    canvas.translate(
+      (size.width - 24 * scale) / 2,
+      (size.height - 24 * scale) / 2,
+    );
+    canvas.scale(scale);
+
+    final shell = Paint()
       ..color = bodyColor
       ..style = PaintingStyle.stroke
-      ..strokeWidth = width * 0.075
+      ..strokeWidth = 1.35
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
     final screen = Paint()
-      ..color = screenColor
+      ..color = screenColor.withValues(alpha: 0.92)
       ..style = PaintingStyle.fill;
-    final detail = Paint()
+    final controls = Paint()
       ..color = detailColor
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = width * 0.055
-      ..strokeCap = StrokeCap.round;
+      ..style = PaintingStyle.fill;
 
-    final top = RRect.fromRectAndRadius(
-      Rect.fromLTWH(width * 0.17, height * 0.05, width * 0.66, height * 0.37),
-      Radius.circular(width * 0.08),
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        const Rect.fromLTWH(0.75, 0.75, 22.5, 22.5),
+        const Radius.circular(2.05),
+      ),
+      shell,
     );
-    final bottom = RRect.fromRectAndRadius(
-      Rect.fromLTWH(width * 0.10, height * 0.53, width * 0.80, height * 0.40),
-      Radius.circular(width * 0.09),
-    );
-    canvas.drawRRect(top, body);
-    canvas.drawRRect(bottom, body);
     canvas.drawLine(
-      Offset(width * 0.27, height * 0.48),
-      Offset(width * 0.73, height * 0.48),
-      body,
+      const Offset(0.85, 11.65),
+      const Offset(23.15, 11.65),
+      shell,
     );
 
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-        Rect.fromLTWH(width * 0.29, height * 0.14, width * 0.42, height * 0.19),
-        Radius.circular(width * 0.025),
+        const Rect.fromLTWH(5.9, 3.1, 12.1, 6.7),
+        const Radius.circular(0.65),
       ),
       screen,
     );
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-        Rect.fromLTWH(width * 0.37, height * 0.61, width * 0.27, height * 0.18),
-        Radius.circular(width * 0.025),
+        const Rect.fromLTWH(7.65, 14.65, 8.7, 6.25),
+        const Radius.circular(0.55),
       ),
       screen,
     );
 
-    canvas.drawCircle(
-      Offset(width * 0.23, height * 0.68),
-      width * 0.065,
-      detail,
-    );
-    canvas.drawLine(
-      Offset(width * 0.20, height * 0.83),
-      Offset(width * 0.28, height * 0.83),
-      detail,
-    );
-    canvas.drawLine(
-      Offset(width * 0.24, height * 0.79),
-      Offset(width * 0.24, height * 0.87),
-      detail,
-    );
-    canvas.drawCircle(
-      Offset(width * 0.76, height * 0.67),
-      width * 0.023,
-      detail,
-    );
-    canvas.drawCircle(
-      Offset(width * 0.82, height * 0.72),
-      width * 0.023,
-      detail,
-    );
-    canvas.drawCircle(
-      Offset(width * 0.70, height * 0.72),
-      width * 0.023,
-      detail,
-    );
-    canvas.drawCircle(
-      Offset(width * 0.76, height * 0.77),
-      width * 0.023,
-      detail,
-    );
+    canvas.drawCircle(const Offset(4.2, 16.6), 1.6, controls);
+    for (final point in const [
+      Offset(19.8, 15.2),
+      Offset(21.25, 16.65),
+      Offset(18.35, 16.65),
+      Offset(19.8, 18.1),
+    ]) {
+      canvas.drawCircle(point, 0.63, controls);
+    }
+
+    canvas.restore();
   }
 
   @override
@@ -194,110 +142,4 @@ class _Nintendo3dsPainter extends CustomPainter {
       oldDelegate.bodyColor != bodyColor ||
       oldDelegate.screenColor != screenColor ||
       oldDelegate.detailColor != detailColor;
-}
-
-class _CiaCartridgePainter extends CustomPainter {
-  const _CiaCartridgePainter({
-    required this.bodyColor,
-    required this.labelColor,
-  });
-
-  final Color bodyColor;
-  final Color labelColor;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final width = size.width;
-    final height = size.height;
-    final cartridge = Path()
-      ..moveTo(width * 0.24, height * 0.08)
-      ..lineTo(width * 0.40, height * 0.08)
-      ..lineTo(width * 0.43, height * 0.15)
-      ..lineTo(width * 0.65, height * 0.15)
-      ..lineTo(width * 0.68, height * 0.08)
-      ..lineTo(width * 0.75, height * 0.08)
-      ..quadraticBezierTo(
-        width * 0.86,
-        height * 0.08,
-        width * 0.86,
-        height * 0.20,
-      )
-      ..lineTo(width * 0.86, height * 0.78)
-      ..lineTo(width * 0.76, height * 0.92)
-      ..lineTo(width * 0.24, height * 0.92)
-      ..lineTo(width * 0.14, height * 0.78)
-      ..lineTo(width * 0.14, height * 0.20)
-      ..quadraticBezierTo(
-        width * 0.14,
-        height * 0.08,
-        width * 0.24,
-        height * 0.08,
-      )
-      ..close();
-    canvas.drawPath(cartridge, Paint()..color = bodyColor);
-
-    final labelRect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(width * 0.23, height * 0.29, width * 0.54, height * 0.42),
-      Radius.circular(width * 0.05),
-    );
-    canvas.drawRRect(
-      labelRect,
-      Paint()..color = labelColor.withValues(alpha: 0.96),
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(
-          width * 0.28,
-          height * 0.34,
-          width * 0.035,
-          height * 0.14,
-        ),
-        Radius.circular(width * 0.012),
-      ),
-      Paint()..color = const Color(0xFFFA6581),
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(
-          width * 0.33,
-          height * 0.34,
-          width * 0.035,
-          height * 0.14,
-        ),
-        Radius.circular(width * 0.012),
-      ),
-      Paint()..color = const Color(0xFF36CBB0),
-    );
-    final text = TextPainter(
-      text: TextSpan(
-        text: 'CIA',
-        style: TextStyle(
-          color: bodyColor,
-          fontSize: width * 0.18,
-          fontWeight: FontWeight.w900,
-          letterSpacing: width * 0.015,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    text.paint(canvas, Offset(width * 0.40, height * 0.43));
-
-    final contact = Paint()
-      ..color = const Color(0xFFFFD25F)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = width * 0.035
-      ..strokeCap = StrokeCap.round;
-    for (final x in const [0.32, 0.41, 0.50, 0.59, 0.68]) {
-      canvas.drawLine(
-        Offset(width * x, height * 0.79),
-        Offset(width * x, height * 0.86),
-        contact,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _CiaCartridgePainter oldDelegate) =>
-      oldDelegate.bodyColor != bodyColor ||
-      oldDelegate.labelColor != labelColor;
 }

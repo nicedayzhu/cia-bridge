@@ -7,6 +7,7 @@ import 'models.dart';
 const fbiDiscoveryPort = 5001;
 const fbiDiscoveryRequest = 'CIA_BRIDGE_DISCOVER_V1';
 const fbiDiscoveryResponsePrefix = 'CIA_BRIDGE_FBI_V1;tcp=';
+const fbiDiscoveryV2Prefix = 'CIA_BRIDGE_FBI_V2;';
 
 class DeviceDiscovery {
   DeviceDiscovery(
@@ -121,8 +122,29 @@ NearbyDevice? parseFbiDiscoveryResponse({
   if (localPrefix == null ||
       sourcePrefix != localPrefix ||
       sourceIp == localAddress ||
-      !payload.startsWith(fbiDiscoveryResponsePrefix)) {
+      (!payload.startsWith(fbiDiscoveryResponsePrefix) &&
+          !payload.startsWith(fbiDiscoveryV2Prefix))) {
     return null;
+  }
+
+  if (payload.startsWith(fbiDiscoveryV2Prefix)) {
+    final fields = <String, String>{};
+    for (final field
+        in payload.substring(fbiDiscoveryV2Prefix.length).split(';')) {
+      final separator = field.indexOf('=');
+      if (separator <= 0) continue;
+      fields[field.substring(0, separator)] = field.substring(separator + 1);
+    }
+    final ciaPort = _validPort(fields['cia']) ?? 5000;
+    final patchPort = _validPort(fields['patch']);
+    if (patchPort == null || fields['codecs'] != 'raw') return null;
+    return NearbyDevice(
+      ip: sourceIp,
+      mac: '',
+      port: ciaPort,
+      patchPort: patchPort,
+      isProtocolDiscovered: true,
+    );
   }
 
   final portText = payload.substring(fbiDiscoveryResponsePrefix.length);
@@ -136,6 +158,12 @@ NearbyDevice? parseFbiDiscoveryResponse({
     port: port,
     isProtocolDiscovered: true,
   );
+}
+
+int? _validPort(String? text) {
+  if (text == null || !RegExp(r'^\d{1,5}$').hasMatch(text)) return null;
+  final value = int.tryParse(text);
+  return value != null && value >= 1 && value <= 65535 ? value : null;
 }
 
 List<NearbyDevice> devicesFromNeighbors(

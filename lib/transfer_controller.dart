@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
@@ -7,28 +8,43 @@ import 'core/fbi_protocol_client.dart';
 import 'core/device_discovery.dart';
 import 'core/lan_addresses.dart';
 import 'core/models.dart';
+import 'core/patch_bundle.dart';
+import 'core/patch_title_info.dart';
 import 'platform/file_host_bridge.dart';
 
 class TransferController extends ChangeNotifier {
   TransferController({
     FileHostBridge? bridge,
     CiaMetadataParser? metadataParser,
+    PatchBundleBuilder? patchBuilder,
+    PatchTitleInfoService? patchTitleInfoService,
     Future<List<String>> Function()? addressFinder,
     Future<List<NearbyDevice>> Function(String address)? deviceScanner,
+    DateTime Function()? now,
   }) : _bridge = bridge ?? FileHostBridge(),
        _metadataParser = metadataParser ?? const CiaMetadataParser(),
-       _addressFinder = addressFinder ?? findLanIpv4Addresses {
+       _patchBuilder = patchBuilder ?? const PatchBundleBuilder(),
+       _patchTitleInfoService =
+           patchTitleInfoService ?? PatchTitleInfoService(),
+       _addressFinder = addressFinder ?? findLanIpv4Addresses,
+       _now = now ?? DateTime.now {
     _bridge.onEvent = _handleHostEvent;
     _scanDevices = deviceScanner ?? DeviceDiscovery(_bridge.listNeighbors).scan;
   }
 
   final FileHostBridge _bridge;
   final CiaMetadataParser _metadataParser;
+  final PatchBundleBuilder _patchBuilder;
+  final PatchTitleInfoService _patchTitleInfoService;
   final Future<List<String>> Function() _addressFinder;
+  final DateTime Function() _now;
   late final Future<List<NearbyDevice>> Function(String address) _scanDevices;
   final FbiProtocolClient _fbi = FbiProtocolClient();
 
   final List<ShareFile> files = [];
+  PreparedPatch? preparedPatch;
+  PatchTitleInfo? patchTitleInfo;
+  bool buildingPatch = false;
   List<String> addresses = [];
   List<NearbyDevice> devices = [];
   NearbyDevice? selectedDevice;
@@ -43,10 +59,16 @@ class TransferController extends ChangeNotifier {
   TransferMode mode = TransferMode.qr;
   TransferPhase phase = TransferPhase.idle;
   HostingSession? session;
-  String status = '选择 CIA 后即可通过局域网交给 FBI';
+  String status = '选择安装文件或补丁 ZIP 后即可通过局域网发送';
   int bytesServed = 0;
   int totalBytes = 0;
+  bool transferActive = false;
+  double transferBytesPerSecond = 0;
+  DateTime? estimatedCompletionAt;
   bool serverRunning = false;
+  DateTime? _lastProgressAt;
+  int _lastProgressBytes = 0;
+  int _speedSampleCount = 0;
   int _deviceScanGeneration = 0;
   bool _disposed = false;
 
@@ -58,7 +80,36 @@ class TransferController extends ChangeNotifier {
     return (bytesServed / totalBytes).clamp(0, 1);
   }
 
-  int get selectedBytes => files.fold(0, (total, file) => total + file.size);
+  Duration? get estimatedRemaining {
+    final completionAt = estimatedCompletionAt;
+    if (!transferActive || completionAt == null) return null;
+    final remaining = completionAt.difference(_now());
+    return remaining.isNegative ? Duration.zero : remaining;
+  }
+
+  bool get isPatchMode => preparedPatch != null;
+
+  String get patchDisplayName {
+    final patch = preparedPatch;
+    if (patch == null) return '';
+    return patchTitleInfo?.name ?? patch.sourceLabel;
+  }
+
+  String get patchInfoLine {
+    final patch = preparedPatch;
+    if (patch == null) return '';
+    final details = patchTitleInfo?.details ?? '';
+    return [
+      if (details.isNotEmpty) details,
+      'Title ID ${patch.titleId}',
+    ].join(' · ');
+  }
+
+  List<ShareFile> get selectedFiles =>
+      preparedPatch == null ? List.unmodifiable(files) : [preparedPatch!.file];
+
+  int get selectedBytes =>
+      selectedFiles.fold(0, (total, file) => total + file.size);
 
   Future<void> initialize() async {
     await refreshAddresses();
@@ -104,6 +155,41 @@ class TransferController extends ChangeNotifier {
 
   Future<void> pickFiles() async {
     final picked = await _bridge.pickFiles();
+    final archives = picked.where((file) => file.isZip).toList(growable: false);
+    if (archives.isNotEmpty) {
+      if (archives.length != 1 || picked.length != 1) {
+        await _deleteTemporarySelections(picked);
+        throw const FormatException('补丁 ZIP 不能和安装文件混选，请一次只选择一个补丁 ZIP');
+      }
+      if (selectedDevice?.supportsPatch != true) {
+        await _deleteTemporarySelections(picked);
+        throw StateError(
+          '当前设备未检测到 FBI CIA Bridge 补丁能力，仅能使用 CIA 安装服务。'
+          '请先在 3DS 上安装并打开 FBI CIA Bridge。',
+        );
+      }
+      final archive = archives.single;
+      final path = archive.path;
+      if (path == null || path.isEmpty) {
+        await _deleteTemporarySelections(picked);
+        throw const FileSystemException('无法读取所选补丁 ZIP');
+      }
+      await _preparePatch(
+        PatchInput.local(
+          path,
+          label: archive.name,
+          deleteLocalPath: archive.deleteLocalPath,
+        ),
+      );
+      return;
+    }
+    if (picked.isNotEmpty && preparedPatch != null) {
+      final previous = preparedPatch;
+      preparedPatch = null;
+      patchTitleInfo = null;
+      unawaited(previous!.delete());
+      targetPort = selectedDevice?.port ?? 5000;
+    }
     var ignored = 0;
     final addedCiaIds = <String>[];
     for (final file in picked) {
@@ -134,6 +220,77 @@ class TransferController extends ChangeNotifier {
       status = _selectionStatus(ignored: ignored);
       _notify();
     }
+  }
+
+  Future<void> _preparePatch(PatchInput? input) async {
+    if (input == null) return;
+
+    buildingPatch = true;
+    status = '正在扫描并准备 LayeredFS 快速安装流…';
+    _notify();
+    try {
+      final next = await _patchBuilder.buildInput(
+        input,
+        onProgress: (completed, total, path) {
+          if (completed == total || completed % 50 == 0) {
+            status = '正在打包补丁 $completed / $total · $path';
+            _notify();
+          }
+        },
+      );
+      final previous = preparedPatch;
+      preparedPatch = next;
+      patchTitleInfo = null;
+      files.clear();
+      if (previous != null) unawaited(previous.delete());
+      final device = selectedDevice;
+      targetPort = device?.patchPort ?? 5002;
+      status = _patchReadyStatus(next);
+      unawaited(_resolvePatchTitleInfo(next));
+    } catch (_) {
+      status = '补丁准备失败，请检查 ZIP 内的 LayeredFS 结构';
+      rethrow;
+    } finally {
+      await input.dispose();
+      buildingPatch = false;
+      _notify();
+    }
+  }
+
+  Future<void> _deleteTemporarySelections(Iterable<ShareFile> selected) async {
+    for (final file in selected) {
+      final path = file.path;
+      if (!file.deleteLocalPath || path == null || path.isEmpty) continue;
+      try {
+        final local = File(path);
+        if (await local.exists()) await local.delete();
+      } catch (_) {
+        // The platform cache is also pruned by age on the next selection.
+      }
+    }
+  }
+
+  Future<void> _resolvePatchTitleInfo(PreparedPatch patch) async {
+    try {
+      final dataDirectory = await _bridge.dataDirectory();
+      final info = await _patchTitleInfoService.resolve(
+        patch.titleId,
+        dataDirectory: dataDirectory,
+      );
+      if (preparedPatch?.bundleId != patch.bundleId) return;
+      patchTitleInfo = info;
+      if (phase == TransferPhase.idle) status = _patchReadyStatus(patch);
+      _notify();
+    } catch (_) {
+      // Title information is optional; patch transport remains fully offline.
+    }
+  }
+
+  String _patchReadyStatus(PreparedPatch patch) {
+    final name = patchTitleInfo?.name ?? patch.sourceLabel;
+    return '已准备 $name · Title ID ${patch.titleId} · '
+        '${patch.fileCount} 个文件 · '
+        '${formatBytes(patch.rawBytes)} · raw 快速安装';
   }
 
   Future<void> _inspectCia(String id) async {
@@ -195,6 +352,11 @@ class TransferController extends ChangeNotifier {
 
   void clearFiles() {
     files.clear();
+    final patch = preparedPatch;
+    preparedPatch = null;
+    patchTitleInfo = null;
+    if (patch != null) unawaited(patch.delete());
+    targetPort = selectedDevice?.port ?? 5000;
     _notify();
   }
 
@@ -235,14 +397,16 @@ class TransferController extends ChangeNotifier {
       }
       if (selectedDevice != null) {
         targetIp = selectedDevice!.ip;
-        targetPort = selectedDevice!.port;
+        targetPort = isPatchMode
+            ? selectedDevice!.patchPort ?? 5002
+            : selectedDevice!.port;
       }
       discoveryStatus = found.isEmpty
           ? '暂未发现 Nintendo 设备；请唤醒 3DS 后重试'
           : found.every((device) => device.isProtocolDiscovered)
           ? '发现 ${found.length} 台正在等待接收的 3DS'
           : found.every((device) => device.isCandidate)
-          ? '发现 ${found.length} 个在线候选；请对照 FBI 屏幕上的 IP 选择'
+          ? '发现 ${found.length} 个在线候选；请对照 3DS 屏幕上的 IP 选择'
           : '发现 ${found.length} 台 Nintendo 设备';
     } catch (error) {
       if (generation != _deviceScanGeneration || selectedAddress != address) {
@@ -261,15 +425,26 @@ class TransferController extends ChangeNotifier {
   }
 
   void selectDevice(NearbyDevice device) {
+    final discardedPatch = isPatchMode && !device.supportsPatch;
+    if (discardedPatch) {
+      final previous = preparedPatch;
+      preparedPatch = null;
+      patchTitleInfo = null;
+      if (previous != null) unawaited(previous.delete());
+    }
     selectedDevice = device;
     targetIp = device.ip;
-    targetPort = device.port;
+    targetPort = isPatchMode ? device.patchPort! : device.port;
     mode = TransferMode.push;
-    status = '已选择 ${device.name} · ${device.ip}:${device.port}';
+    status = device.supportsPatch
+        ? '已连接 FBI CIA Bridge · 支持 CIA 安装和 LayeredFS 补丁'
+        : discardedPatch
+        ? '当前 FBI 仅支持 CIA 安装，已移除不可发送的 LayeredFS 补丁'
+        : '未检测到 FBI CIA Bridge 补丁能力 · 当前仅支持 CIA 安装';
     _notify();
   }
 
-  void addManualDevice(String ip, {int port = 5000}) {
+  void addManualDevice(String ip, {int port = 5000, int? patchPort}) {
     final trimmed = ip.trim();
     final octets = trimmed.split('.');
     if (octets.length != 4 ||
@@ -279,39 +454,51 @@ class TransferController extends ChangeNotifier {
         })) {
       throw StateError('请输入有效的 3DS IPv4 地址');
     }
-    if (port < 1 || port > 65535) throw StateError('FBI 端口必须在 1–65535 之间');
+    if (port < 1 || port > 65535) throw StateError('接收端口必须在 1–65535 之间');
+    if (patchPort != null && (patchPort < 1 || patchPort > 65535)) {
+      throw StateError('补丁端口必须在 1–65535 之间');
+    }
     final manual = NearbyDevice(
       ip: trimmed,
       mac: '',
       port: port,
+      patchPort: patchPort,
       isManual: true,
     );
     devices = [manual, ...devices.where((device) => device.ip != trimmed)];
     selectedDevice = manual;
     targetIp = trimmed;
-    targetPort = port;
+    targetPort = isPatchMode && patchPort != null ? patchPort : port;
     mode = TransferMode.push;
-    status = '已添加 3DS · $trimmed';
+    status = patchPort == null
+        ? '已添加 3DS · $trimmed · 支持安装文件'
+        : '已添加 3DS · $trimmed · 支持安装文件和 LayeredFS 补丁';
     _notify();
   }
 
   Future<void> startQr() async {
+    if (isPatchMode) {
+      throw StateError(
+        'LayeredFS 补丁仅支持推送，请在 3DS 的 FBI 中打开 '
+        '“Remote Install / Receive URLs over the network”',
+      );
+    }
     _validateCommon();
     await _startHosting();
     phase = TransferPhase.hosting;
     status = session!.usedFallbackPort
-        ? '首选端口被占用，已自动改用 ${session!.port}；等待 FBI 扫码'
-        : '二维码已就绪，等待 FBI 扫码下载';
+        ? '首选端口被占用，已自动改用 ${session!.port}；等待 3DS 扫码'
+        : '二维码已就绪，等待 3DS 扫码下载';
     _notify();
   }
 
   Future<void> startPush() async {
     _validateCommon();
     if (targetIp.trim().isEmpty) {
-      throw StateError('请填写 FBI 屏幕上显示的 3DS IP');
+      throw StateError('请填写 3DS 接收端屏幕上显示的 IP');
     }
     if (targetPort < 1 || targetPort > 65535) {
-      throw StateError('FBI 端口必须在 1–65535 之间');
+      throw StateError('接收端口必须在 1–65535 之间');
     }
     await _startHosting();
     phase = TransferPhase.connecting;
@@ -336,9 +523,10 @@ class TransferController extends ChangeNotifier {
     status = '正在启动局域网文件服务…';
     bytesServed = 0;
     totalBytes = selectedBytes;
+    _resetTransferMetrics();
     _notify();
     session = await _bridge.start(
-      files: List.unmodifiable(files),
+      files: selectedFiles,
       advertisedAddress: selectedAddress!,
       preferredPort: httpPort,
     );
@@ -347,9 +535,17 @@ class TransferController extends ChangeNotifier {
   }
 
   void _validateCommon() {
-    if (files.isEmpty) throw StateError('请先选择至少一个 CIA 文件');
+    if (selectedFiles.isEmpty) {
+      throw StateError('请先选择安装文件或 LayeredFS 补丁目录');
+    }
     if (selectedAddress == null || selectedAddress!.isEmpty) {
       throw StateError('没有可用的局域网 IPv4 地址');
+    }
+    if (isPatchMode && selectedDevice?.supportsPatch != true) {
+      throw StateError(
+        '当前设备的 FBI 仅支持 CIA 安装，不支持 LayeredFS 补丁。'
+        '请安装 FBI CIA Bridge 后重试。',
+      );
     }
     if (httpPort < 0 || httpPort > 65535) {
       throw StateError('HTTP 端口必须在 0–65535 之间');
@@ -360,20 +556,28 @@ class TransferController extends ChangeNotifier {
     switch (stage) {
       case FbiClientStage.connecting:
         phase = TransferPhase.connecting;
-        status = '正在连接 3DS 的 FBI…';
+        status = '正在连接 3DS 接收端…';
       case FbiClientStage.urlsSent:
         phase = TransferPhase.waitingForFbi;
-        status = '链接已发送，请在 3DS 上确认安装';
+        status = isPatchMode
+            ? '补丁链接已发送，请在 3DS 上确认直接覆盖；如中断请重新发送同一补丁'
+            : '链接已发送，请在 3DS 上确认安装';
       case FbiClientStage.acknowledged:
         phase = TransferPhase.complete;
-        status = 'FBI 已完成本次请求，局域网服务已停止';
+        status = '3DS 接收端已完成本次请求，局域网服务已停止';
         serverRunning = false;
+        transferActive = false;
+        estimatedCompletionAt = null;
         unawaited(_bridge.stop());
       case FbiClientStage.cancelled:
         return;
       case FbiClientStage.failed:
         phase = TransferPhase.error;
-        status = '连接 FBI 失败：${_cleanError(error)}。文件服务仍在运行，可切换扫码。';
+        transferActive = false;
+        estimatedCompletionAt = null;
+        status = isPatchMode
+            ? '连接 3DS 接收端失败：${_cleanError(error)}。请确认接收页面仍保持打开。'
+            : '连接 3DS 接收端失败：${_cleanError(error)}。文件服务仍在运行，可切换扫码。';
     }
     _notify();
   }
@@ -382,25 +586,84 @@ class TransferController extends ChangeNotifier {
     switch (event.type) {
       case HostEventType.downloadStarted:
         phase = TransferPhase.transferring;
-        status = 'FBI 正在下载 ${event.fileName}';
+        _beginTransferMeasurement();
+        status = isPatchMode
+            ? '3DS 正在流式接收并写入 ${event.fileName}'
+            : '3DS 正在接收 ${event.fileName}';
       case HostEventType.progress:
         phase = TransferPhase.transferring;
         bytesServed = event.sessionBytes;
         totalBytes = event.sessionTotal;
-        status =
-            '正在传输 ${event.fileName} · ${formatBytes(bytesServed)} / ${formatBytes(totalBytes)}';
+        _updateTransferMeasurement();
+        status = '正在传输 ${event.fileName}';
       case HostEventType.downloadFinished:
-        status = '已传完 ${event.fileName}，等待 FBI 安装/确认…';
+        bytesServed = event.sessionBytes;
+        totalBytes = event.sessionTotal;
+        transferActive = false;
+        estimatedCompletionAt = null;
+        status = '已传完 ${event.fileName}，等待 3DS 安装/确认…';
       case HostEventType.error:
+        transferActive = false;
+        estimatedCompletionAt = null;
         status = '传输提示：${event.message}';
       case HostEventType.stopped:
         serverRunning = false;
+        transferActive = false;
+        estimatedCompletionAt = null;
         if (phase != TransferPhase.complete) {
           phase = TransferPhase.idle;
           status = '局域网服务已停止';
         }
     }
     _notify();
+  }
+
+  void _beginTransferMeasurement() {
+    if (transferActive) return;
+    transferActive = true;
+    _lastProgressAt = _now();
+    _lastProgressBytes = bytesServed;
+    estimatedCompletionAt = null;
+  }
+
+  void _updateTransferMeasurement() {
+    if (!transferActive) _beginTransferMeasurement();
+    final now = _now();
+    final previousAt = _lastProgressAt;
+    final elapsed = previousAt == null
+        ? Duration.zero
+        : now.difference(previousAt);
+    final byteDelta = bytesServed - _lastProgressBytes;
+
+    if (byteDelta > 0 && elapsed.inMilliseconds >= 120) {
+      final sample = byteDelta / (elapsed.inMicroseconds / 1000000);
+      transferBytesPerSecond = _speedSampleCount == 0
+          ? sample
+          : (transferBytesPerSecond * 0.72) + (sample * 0.28);
+      _speedSampleCount++;
+      _lastProgressAt = now;
+      _lastProgressBytes = bytesServed;
+    }
+
+    final remainingBytes = totalBytes - bytesServed;
+    if (remainingBytes > 0 && transferBytesPerSecond > 0) {
+      final remainingMilliseconds =
+          (remainingBytes / transferBytesPerSecond * 1000).ceil();
+      estimatedCompletionAt = now.add(
+        Duration(milliseconds: remainingMilliseconds),
+      );
+    } else {
+      estimatedCompletionAt = null;
+    }
+  }
+
+  void _resetTransferMetrics() {
+    transferActive = false;
+    transferBytesPerSecond = 0;
+    estimatedCompletionAt = null;
+    _lastProgressAt = null;
+    _lastProgressBytes = 0;
+    _speedSampleCount = 0;
   }
 
   Future<void> stop() async {
@@ -410,26 +673,29 @@ class TransferController extends ChangeNotifier {
     session = null;
     bytesServed = 0;
     totalBytes = 0;
+    _resetTransferMetrics();
     phase = TransferPhase.idle;
     status = '局域网服务已停止';
     _notify();
   }
 
   void finishResult({bool clearSelection = false}) {
-    if (clearSelection) files.clear();
+    if (clearSelection) clearFiles();
     session = null;
     bytesServed = 0;
     totalBytes = 0;
+    _resetTransferMetrics();
     phase = TransferPhase.idle;
     status = clearSelection ? '选择文件后即可发送到 3DS' : '可以继续发送当前文件';
     _notify();
   }
 
   void useQrFallback() {
+    if (isPatchMode) return;
     if (!serverRunning || session == null) return;
     mode = TransferMode.qr;
     phase = TransferPhase.hosting;
-    status = '二维码已就绪，请在 FBI 中选择 Scan QR Code';
+    status = '二维码已就绪，请在 3DS 接收端选择 Scan QR Code';
     _notify();
   }
 
@@ -447,6 +713,8 @@ class TransferController extends ChangeNotifier {
     _disposed = true;
     _fbi.cancel();
     unawaited(_bridge.stop());
+    final patch = preparedPatch;
+    if (patch != null) unawaited(patch.delete());
     super.dispose();
   }
 }
