@@ -9,6 +9,8 @@ import '../transfer_controller.dart';
 import 'game_icons.dart';
 import 'transfer_panel.dart';
 
+const _appVersion = String.fromEnvironment('APP_VERSION', defaultValue: '开发构建');
+
 enum _FlowStage { device, files }
 
 class HomePage extends StatefulWidget {
@@ -347,79 +349,108 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 ? controller.selectedAddress
                 : null;
             return AlertDialog(
-              title: const Text('网络设置'),
+              title: const Text('设置'),
               content: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 460),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    DropdownButtonFormField<String>(
-                      key: ValueKey(
-                        '${controller.addresses.join('|')}|$selected',
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        '网络',
+                        style: Theme.of(context).textTheme.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w700),
                       ),
-                      initialValue: selected,
-                      isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: '本机局域网地址',
-                        prefixIcon: Icon(Icons.wifi_tethering_rounded),
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<String>(
+                        key: ValueKey(
+                          '${controller.addresses.join('|')}|$selected',
+                        ),
+                        initialValue: selected,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: '本机局域网地址',
+                          prefixIcon: Icon(Icons.wifi_tethering_rounded),
+                        ),
+                        hint: const Text('尚未检测到可用地址'),
+                        items: controller.addresses
+                            .map(
+                              (address) => DropdownMenuItem(
+                                value: address,
+                                child: Text(address),
+                              ),
+                            )
+                            .toList(growable: false),
+                        onChanged: controller.addresses.isEmpty
+                            ? null
+                            : controller.setAddress,
                       ),
-                      hint: const Text('尚未检测到可用地址'),
-                      items: controller.addresses
-                          .map(
-                            (address) => DropdownMenuItem(
-                              value: address,
-                              child: Text(address),
-                            ),
-                          )
-                          .toList(growable: false),
-                      onChanged: controller.addresses.isEmpty
-                          ? null
-                          : controller.setAddress,
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            controller.addressStatus,
-                            style: TextStyle(
-                              color: context.mutedColor,
-                              fontSize: 11.5,
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              controller.addressStatus,
+                              style: TextStyle(
+                                color: context.mutedColor,
+                                fontSize: 11.5,
+                              ),
                             ),
                           ),
-                        ),
-                        TextButton.icon(
-                          key: const Key('refresh-addresses-button'),
-                          onPressed: controller.scanningAddresses
-                              ? null
-                              : () => controller.refreshAddresses(),
-                          icon: controller.scanningAddresses
-                              ? const SizedBox.square(
-                                  dimension: 14,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.refresh_rounded, size: 18),
-                          label: const Text('重新检测'),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: port,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: const InputDecoration(
-                        labelText: 'HTTP 端口',
-                        helperText: '默认 8080；冲突时自动回退',
-                        prefixIcon: Icon(Icons.http_rounded),
+                          TextButton.icon(
+                            key: const Key('refresh-addresses-button'),
+                            onPressed: controller.scanningAddresses
+                                ? null
+                                : () => controller.refreshAddresses(),
+                            icon: controller.scanningAddresses
+                                ? const SizedBox.square(
+                                    dimension: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.refresh_rounded, size: 18),
+                            label: const Text('重新检测'),
+                          ),
+                        ],
                       ),
-                      onChanged: (value) =>
-                          controller.httpPort = int.tryParse(value) ?? 8080,
-                    ),
-                  ],
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: port,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        decoration: const InputDecoration(
+                          labelText: 'HTTP 端口',
+                          helperText: '默认 8080；冲突时自动回退',
+                          prefixIcon: Icon(Icons.http_rounded),
+                        ),
+                        onChanged: (value) =>
+                            controller.httpPort = int.tryParse(value) ?? 8080,
+                      ),
+                      const Divider(height: 28),
+                      ListTile(
+                        key: const Key('usage-guide-tile'),
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.help_outline_rounded),
+                        title: const Text('使用方法'),
+                        subtitle: const Text('查看连接、选择和发送流程'),
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        onTap: () => _showUsageGuide(dialogContext),
+                      ),
+                      ListTile(
+                        key: const Key('about-app-tile'),
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.info_outline_rounded),
+                        title: const Text('版本与许可'),
+                        subtitle: const Text('CIA Bridge · $_appVersion'),
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        onTap: () => _showAbout(dialogContext),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               actions: [
@@ -435,6 +466,69 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     } finally {
       port.dispose();
     }
+  }
+
+  void _showUsageGuide(BuildContext context) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('使用方法'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: SingleChildScrollView(
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _UsageStep(
+                  number: 1,
+                  title: '准备网络与 FBI',
+                  detail: '设备在同一局域网，并在 FBI → Remote Install 中打开 Receive URLs over the network。',
+                ),
+                _UsageStep(
+                  number: 2,
+                  title: '选择 3DS',
+                  detail: '等待自动发现；如果没有显示，可重新扫描或手动输入 IP。',
+                ),
+                _UsageStep(
+                  number: 3,
+                  title: '选择要发送的内容',
+                  detail: '可选择 CIA 安装文件，或 LayeredFS 补丁目录。',
+                ),
+                _UsageStep(
+                  number: 4,
+                  title: '发送并在 3DS 确认',
+                  detail: '发送后根据 3DS 上的提示确认，保持 CIA Bridge 打开直至完成。',
+                  last: true,
+                ),
+                SizedBox(height: 6),
+                _GuideNote(),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAbout(BuildContext context) {
+    showAboutDialog(
+      context: context,
+      applicationName: 'CIA Bridge',
+      applicationVersion: _appVersion,
+      applicationIcon: const GameBridgeLogo(size: 48),
+      applicationLegalese: 'MIT License',
+      children: const [
+        Text('把安装文件和 LayeredFS 补丁从电脑或手机发送到 Nintendo 3DS。'),
+        SizedBox(height: 10),
+        Text('第三方组件许可证详见程序随附的 THIRD_PARTY_NOTICES.md。'),
+      ],
+    );
   }
 
   void _showError(Object error) {
@@ -536,7 +630,8 @@ class _TopBar extends StatelessWidget {
                     ),
                     const SizedBox(width: 4),
                     IconButton.filledTonal(
-                      tooltip: '网络设置',
+                      key: const Key('settings-button'),
+                      tooltip: '设置',
                       onPressed: onNetworkSettings,
                       icon: const Icon(Icons.tune_rounded, size: 20),
                     ),
@@ -546,6 +641,117 @@ class _TopBar extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _UsageStep extends StatelessWidget {
+  const _UsageStep({
+    required this.number,
+    required this.title,
+    required this.detail,
+    this.last = false,
+  });
+
+  final int number;
+  final String title;
+  final String detail;
+  final bool last;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Column(
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primaryContainer,
+                shape: BoxShape.circle,
+              ),
+              child: Text(
+                '$number',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: theme.colorScheme.onPrimaryContainer,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            if (!last)
+              Container(
+                width: 1,
+                height: 42,
+                color: theme.colorScheme.outlineVariant,
+              ),
+          ],
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(bottom: last ? 0 : 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  detail,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: context.mutedColor,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _GuideNote extends StatelessWidget {
+  const _GuideNote();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.lock_outline_rounded,
+            size: 18,
+            color: theme.colorScheme.onSecondaryContainer,
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              '文件只在当前局域网传输。',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSecondaryContainer,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1994,43 +2200,95 @@ class _FlowProgress extends StatelessWidget {
     final selectingDevice = stage == _FlowStage.device;
     return Semantics(
       label: selectingDevice ? '第 1 步，共 2 步：选择 3DS' : '第 2 步，共 2 步：选择文件并发送',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  selectingDevice ? '选择 3DS' : '选择文件并发送',
-                  style: theme.textTheme.labelLarge?.copyWith(
+      child: ExcludeSemantics(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Row(
+              children: [
+                _FlowStep(
+                  number: 1,
+                  label: '选择 3DS',
+                  active: selectingDevice,
+                  complete: !selectingDevice,
+                ),
+                Expanded(
+                  child: Container(
+                    height: 2,
+                    margin: const EdgeInsets.symmetric(horizontal: 12),
+                    color: selectingDevice
+                        ? theme.colorScheme.outlineVariant
+                        : theme.colorScheme.primary,
+                  ),
+                ),
+                _FlowStep(
+                  number: 2,
+                  label: '选择文件并发送',
+                  active: !selectingDevice,
+                  complete: false,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FlowStep extends StatelessWidget {
+  const _FlowStep({
+    required this.number,
+    required this.label,
+    required this.active,
+    required this.complete,
+  });
+
+  final int number;
+  final String label;
+  final bool active;
+  final bool complete;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+    final foreground = active || complete
+        ? theme.colorScheme.onPrimary
+        : context.mutedColor;
+    final background = active || complete
+        ? primary
+        : theme.colorScheme.surfaceContainerHighest;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(color: background, shape: BoxShape.circle),
+          alignment: Alignment.center,
+          child: complete
+              ? Icon(Icons.check_rounded, size: 17, color: foreground)
+              : Text(
+                  '$number',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: foreground,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-              ),
-              Text(
-                selectingDevice ? '1 / 2' : '2 / 2',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: context.mutedColor,
-                ),
-              ),
-            ],
+        ),
+        const SizedBox(width: 8),
+        Text(
+          label,
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: active || complete
+                ? theme.colorScheme.onSurface
+                : context.mutedColor,
+            fontWeight: active ? FontWeight.w700 : FontWeight.w500,
           ),
-          const SizedBox(height: 9),
-          Container(
-            height: 4,
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            clipBehavior: Clip.antiAlias,
-            alignment: Alignment.centerLeft,
-            child: FractionallySizedBox(
-              widthFactor: selectingDevice ? 0.5 : 1,
-              child: ColoredBox(color: theme.colorScheme.primary),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

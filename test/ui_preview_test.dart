@@ -532,6 +532,47 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('settings expose an in-app guide and version information', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final controller = _readyController();
+    await tester.pumpWidget(
+      CiaBridgeApp(controller: controller, initializeController: false),
+    );
+
+    await tester.tap(find.byKey(const Key('settings-button')));
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.text('设置'), findsOneWidget);
+    expect(find.byKey(const Key('usage-guide-tile')), findsOneWidget);
+    expect(find.text('CIA Bridge · 开发构建'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('usage-guide-tile')));
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.text('准备网络与 FBI'), findsOneWidget);
+    expect(find.text('发送并在 3DS 确认'), findsOneWidget);
+    expect(find.text('文件只在当前局域网传输。'), findsOneWidget);
+
+    await tester.tap(find.text('知道了'));
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.tap(find.byKey(const Key('about-app-tile')));
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.text('开发构建'), findsOneWidget);
+    expect(find.text('MIT License'), findsOneWidget);
+    expect(
+      find.text('把安装文件和 LayeredFS 补丁从电脑或手机发送到 Nintendo 3DS。'),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+    controller.dispose();
+  });
+
   testWidgets('selected CIA shows offline metadata and a detail sheet', (
     tester,
   ) async {

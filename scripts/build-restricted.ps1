@@ -50,6 +50,7 @@ try {
             '--sdk-root', "$patchedSdk\",
             '--target=flutter',
             '--no-print-incremental-dependencies',
+            "-DAPP_VERSION=$releaseVersion",
             "-DFLUTTER_BUILD_NAME=$releaseVersion",
             "-DFLUTTER_BUILD_NUMBER=$buildNumber",
             "-DFLUTTER_VERSION=$($flutterVersion.frameworkVersion)",

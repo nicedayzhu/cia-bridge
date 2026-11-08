@@ -66,11 +66,11 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'flutter test failed' }
 
     if (-not $SkipWindows) {
-        & $flutter build windows --release
+        & $flutter build windows --release "--dart-define=APP_VERSION=$releaseVersion"
         if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
     }
     if (-not $SkipAndroid) {
-        & $flutter build apk --release
+        & $flutter build apk --release "--dart-define=APP_VERSION=$releaseVersion"
         if ($LASTEXITCODE -ne 0) { throw 'Android build failed' }
         if (-not $hasAndroidReleaseSigning) {
             Write-Warning 'Android release credentials are not set; packaging a debug-signed local test APK.'

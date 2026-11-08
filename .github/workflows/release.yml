@@ -68,6 +68,7 @@ jobs:
           flutter build windows --release
           --build-name ${{ needs.validate.outputs.version }}
           --build-number ${{ github.run_number }}
+          --dart-define=APP_VERSION=${{ needs.validate.outputs.version }}
 
       - name: Package Windows portable build
         shell: pwsh
@@ -139,6 +140,7 @@ jobs:
           flutter build apk --release
           --build-name ${{ needs.validate.outputs.version }}
           --build-number ${{ github.run_number }}
+          --dart-define=APP_VERSION=${{ needs.validate.outputs.version }}
 
       - name: Stage Android package
         shell: bash
