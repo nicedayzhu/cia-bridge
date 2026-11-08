@@ -10,32 +10,117 @@ const fbiDiscoveryResponsePrefix = 'CIA_BRIDGE_FBI_V1;tcp=';
 const fbiDiscoveryV2Prefix = 'CIA_BRIDGE_FBI_V2;';
 
 class DeviceDiscovery {
+  static const _protocolMissGraceScans = 2;
+
   DeviceDiscovery(
     this._listNeighbors, {
     Future<List<NearbyDevice>> Function(String localAddress)? protocolScanner,
-  }) : _protocolScanner = protocolScanner ?? discoverFbiReceivers;
+    Future<List<NearbyDevice>> Function(
+      String localAddress,
+      Iterable<String> targetAddresses,
+    )?
+    targetedProtocolScanner,
+  }) : _protocolScanner = protocolScanner ?? discoverFbiReceivers,
+       _targetedProtocolScanner =
+           targetedProtocolScanner ??
+           (protocolScanner == null
+               ? (localAddress, targetAddresses) => discoverFbiReceivers(
+                   localAddress,
+                   unicastTargets: targetAddresses,
+                 )
+               : null);
 
   final Future<List<NetworkNeighbor>> Function(String localAddress)
   _listNeighbors;
   final Future<List<NearbyDevice>> Function(String localAddress)
   _protocolScanner;
+  final Future<List<NearbyDevice>> Function(
+    String localAddress,
+    Iterable<String> targetAddresses,
+  )?
+  _targetedProtocolScanner;
+  final Map<String, NearbyDevice> _recentProtocolDevices = {};
+  final Map<String, int> _protocolMisses = {};
 
   Future<List<NearbyDevice>> scan(String localAddress) async {
     final prefix = _ipv4Prefix(localAddress);
     if (prefix == null) return const [];
 
     final protocolDevices = await _protocolScanner(localAddress);
-    if (protocolDevices.isNotEmpty) return protocolDevices;
+    if (protocolDevices.isNotEmpty) {
+      _rememberProtocolDevices(protocolDevices);
+      return protocolDevices;
+    }
 
     await _warmNeighborCache(prefix, localAddress);
     final neighbors = await _listNeighbors(localAddress);
-    return devicesFromNeighbors(localAddress, neighbors);
+    final neighborDevices = devicesFromNeighbors(localAddress, neighbors);
+    final targetedScanner = _targetedProtocolScanner;
+    if (neighborDevices.isEmpty || targetedScanner == null) {
+      return _applyProtocolGrace(neighborDevices);
+    }
+
+    // Windows can populate its ARP table while dropping or routing broadcasts
+    // through another adapter. Confirm the known IPs with unicast discovery so
+    // a visible 3DS is upgraded to its real CIA Bridge capabilities.
+    final targetedDevices = await targetedScanner(
+      localAddress,
+      neighborDevices.map((device) => device.ip),
+    );
+    return _applyProtocolGrace(
+      mergeDiscoveredDevices(neighborDevices, targetedDevices),
+    );
+  }
+
+  void _rememberProtocolDevices(Iterable<NearbyDevice> devices) {
+    for (final device in devices) {
+      if (!device.isProtocolDiscovered) continue;
+      _recentProtocolDevices[device.ip] = device;
+      _protocolMisses.remove(device.ip);
+    }
+  }
+
+  List<NearbyDevice> _applyProtocolGrace(List<NearbyDevice> devices) {
+    final visibleAddresses = devices.map((device) => device.ip).toSet();
+    _recentProtocolDevices.keys
+        .where((address) => !visibleAddresses.contains(address))
+        .toList(growable: false)
+        .forEach((address) {
+          _recentProtocolDevices.remove(address);
+          _protocolMisses.remove(address);
+        });
+
+    final stabilized = <NearbyDevice>[];
+    for (final device in devices) {
+      if (device.isProtocolDiscovered) {
+        _rememberProtocolDevices([device]);
+        stabilized.add(device);
+        continue;
+      }
+
+      final recent = _recentProtocolDevices[device.ip];
+      if (recent == null) {
+        stabilized.add(device);
+        continue;
+      }
+
+      final misses = (_protocolMisses[device.ip] ?? 0) + 1;
+      _protocolMisses[device.ip] = misses;
+      if (misses <= _protocolMissGraceScans) {
+        stabilized.add(recent);
+      } else {
+        _recentProtocolDevices.remove(device.ip);
+        _protocolMisses.remove(device.ip);
+        stabilized.add(device);
+      }
+    }
+    return stabilized;
   }
 
   Future<void> _warmNeighborCache(String prefix, String localAddress) async {
     RawDatagramSocket? socket;
     try {
-      socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      socket = await _bindDiscoverySocket(localAddress);
       for (var host = 1; host < 255; host++) {
         final candidate = '$prefix.$host';
         if (candidate == localAddress) continue;
@@ -50,7 +135,10 @@ class DeviceDiscovery {
   }
 }
 
-Future<List<NearbyDevice>> discoverFbiReceivers(String localAddress) async {
+Future<List<NearbyDevice>> discoverFbiReceivers(
+  String localAddress, {
+  Iterable<String> unicastTargets = const [],
+}) async {
   final prefix = _ipv4Prefix(localAddress);
   if (prefix == null) return const [];
 
@@ -58,10 +146,7 @@ Future<List<NearbyDevice>> discoverFbiReceivers(String localAddress) async {
   StreamSubscription<RawSocketEvent>? subscription;
   final found = <String, NearbyDevice>{};
   try {
-    final activeSocket = await RawDatagramSocket.bind(
-      InternetAddress.anyIPv4,
-      0,
-    );
+    final activeSocket = await _bindDiscoverySocket(localAddress);
     socket = activeSocket;
     activeSocket.broadcastEnabled = true;
     subscription = activeSocket.listen((event) {
@@ -86,6 +171,12 @@ Future<List<NearbyDevice>> discoverFbiReceivers(String localAddress) async {
     final targets = <InternetAddress>[
       InternetAddress('$prefix.255'),
       InternetAddress('255.255.255.255'),
+      ...unicastTargets
+          .where(
+            (target) => target != localAddress && _ipv4Prefix(target) == prefix,
+          )
+          .toSet()
+          .map(InternetAddress.new),
     ];
     for (var attempt = 0; attempt < 3; attempt++) {
       for (final target in targets) {
@@ -110,6 +201,18 @@ Future<List<NearbyDevice>> discoverFbiReceivers(String localAddress) async {
     (left, right) => _lastOctet(left.ip).compareTo(_lastOctet(right.ip)),
   );
   return devices;
+}
+
+Future<RawDatagramSocket> _bindDiscoverySocket(String localAddress) async {
+  try {
+    // Binding the selected address keeps Windows from sending discovery over
+    // a VPN, virtual adapter, or a different physical network interface.
+    return await RawDatagramSocket.bind(InternetAddress(localAddress), 0);
+  } on SocketException {
+    // The address can disappear between interface enumeration and scanning.
+    // Falling back preserves discovery on platforms that reject a local bind.
+    return RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+  }
 }
 
 NearbyDevice? parseFbiDiscoveryResponse({
@@ -197,6 +300,23 @@ List<NearbyDevice> devicesFromNeighbors(
     (left, right) => _lastOctet(left.ip).compareTo(_lastOctet(right.ip)),
   );
   return candidates;
+}
+
+List<NearbyDevice> mergeDiscoveredDevices(
+  Iterable<NearbyDevice> fallbackDevices,
+  Iterable<NearbyDevice> protocolDevices,
+) {
+  final devicesByIp = <String, NearbyDevice>{
+    for (final device in fallbackDevices) device.ip: device,
+  };
+  for (final device in protocolDevices) {
+    if (device.isProtocolDiscovered) devicesByIp[device.ip] = device;
+  }
+  final devices = devicesByIp.values.toList(growable: false);
+  devices.sort(
+    (left, right) => _lastOctet(left.ip).compareTo(_lastOctet(right.ip)),
+  );
+  return devices;
 }
 
 bool isNintendoMac(String mac) {

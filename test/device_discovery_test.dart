@@ -68,6 +68,126 @@ void main() {
     expect(neighborScanCalled, isFalse);
   });
 
+  test(
+    'upgrades a Windows ARP result with targeted protocol discovery',
+    () async {
+      final targetedAddresses = <String>[];
+      final discovery = DeviceDiscovery(
+        (_) async => const [
+          NetworkNeighbor(ip: '192.168.0.103', mac: '40:D2:8A:00:00:01'),
+        ],
+        protocolScanner: (_) async => const [],
+        targetedProtocolScanner: (localAddress, addresses) async {
+          expect(localAddress, '192.168.0.104');
+          targetedAddresses.addAll(addresses);
+          return const [
+            NearbyDevice(
+              ip: '192.168.0.103',
+              mac: '',
+              port: 5000,
+              patchPort: 5002,
+              isProtocolDiscovered: true,
+            ),
+          ];
+        },
+      );
+
+      final devices = await discovery.scan('192.168.0.104');
+
+      expect(targetedAddresses, ['192.168.0.103']);
+      expect(devices, hasLength(1));
+      expect(devices.single.isProtocolDiscovered, isTrue);
+      expect(devices.single.supportsPatch, isTrue);
+    },
+  );
+
+  test(
+    'keeps neighbor results when targeted discovery gets no reply',
+    () async {
+      const neighbor = NetworkNeighbor(
+        ip: '192.168.0.103',
+        mac: '40:D2:8A:00:00:01',
+      );
+      final discovery = DeviceDiscovery(
+        (_) async => const [neighbor],
+        protocolScanner: (_) async => const [],
+        targetedProtocolScanner: (_, _) async => const [],
+      );
+
+      final devices = await discovery.scan('192.168.0.104');
+
+      expect(devices, hasLength(1));
+      expect(devices.single.ip, neighbor.ip);
+      expect(devices.single.isProtocolDiscovered, isFalse);
+    },
+  );
+
+  test(
+    'does not drop ready state after one transient missed refresh',
+    () async {
+      var broadcastScans = 0;
+      final discovery = DeviceDiscovery(
+        (_) async => const [
+          NetworkNeighbor(ip: '192.168.0.103', mac: '40:D2:8A:00:00:01'),
+        ],
+        protocolScanner: (_) async {
+          broadcastScans++;
+          return broadcastScans == 1
+              ? const [
+                  NearbyDevice(
+                    ip: '192.168.0.103',
+                    mac: '',
+                    patchPort: 5002,
+                    isProtocolDiscovered: true,
+                  ),
+                ]
+              : const [];
+        },
+        targetedProtocolScanner: (_, _) async => const [],
+      );
+
+      expect(
+        (await discovery.scan('192.168.0.104')).single.isProtocolDiscovered,
+        isTrue,
+      );
+      expect(
+        (await discovery.scan('192.168.0.104')).single.isProtocolDiscovered,
+        isTrue,
+      );
+      expect(
+        (await discovery.scan('192.168.0.104')).single.isProtocolDiscovered,
+        isTrue,
+      );
+      expect(
+        (await discovery.scan('192.168.0.104')).single.isProtocolDiscovered,
+        isFalse,
+      );
+    },
+  );
+
+  test('protocol results take precedence while other devices remain', () {
+    final devices = mergeDiscoveredDevices(
+      const [
+        NearbyDevice(ip: '192.168.0.8', mac: '40:D2:8A:00:00:08'),
+        NearbyDevice(ip: '192.168.0.103', mac: '40:D2:8A:00:00:01'),
+      ],
+      const [
+        NearbyDevice(
+          ip: '192.168.0.103',
+          mac: '',
+          patchPort: 5002,
+          isProtocolDiscovered: true,
+        ),
+      ],
+    );
+
+    expect(devices.map((device) => device.ip), [
+      '192.168.0.8',
+      '192.168.0.103',
+    ]);
+    expect(devices.last.isProtocolDiscovered, isTrue);
+  });
+
   test('recognizes Nintendo OUIs in common MAC address formats', () {
     expect(isNintendoMac('E8:4E:CE:12:34:56'), isTrue);
     expect(isNintendoMac('00-1F-32-AA-BB-CC'), isTrue);

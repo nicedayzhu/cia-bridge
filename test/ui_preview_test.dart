@@ -535,8 +535,8 @@ void main() {
   testWidgets('settings expose an in-app guide and version information', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(320, 640);
     tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 640);
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
@@ -546,8 +546,15 @@ void main() {
     );
 
     await tester.tap(find.byKey(const Key('settings-button')));
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
     expect(find.text('设置'), findsOneWidget);
+    final settingsSheet = find.byKey(const Key('settings-side-sheet'));
+    expect(settingsSheet, findsOneWidget);
+    expect(find.byKey(const Key('settings-close-button')), findsOneWidget);
+    final sheetRect = tester.getRect(settingsSheet);
+    expect(sheetRect.width, lessThanOrEqualTo(420));
+    expect(tester.takeException(), isNull);
     expect(find.byKey(const Key('usage-guide-tile')), findsOneWidget);
     expect(find.text('CIA Bridge · 开发构建'), findsOneWidget);
 

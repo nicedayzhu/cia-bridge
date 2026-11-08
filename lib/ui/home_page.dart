@@ -34,15 +34,18 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   static const _autoRefreshInterval = Duration(seconds: 15);
 
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   Timer? _autoRefreshTimer;
   bool _isForeground = true;
   late _FlowStage _stage;
+  late final TextEditingController _httpPortController;
 
   TransferController get controller => widget.controller;
 
   @override
   void initState() {
     super.initState();
+    _httpPortController = TextEditingController(text: '${controller.httpPort}');
     _stage =
         controller.session != null ||
             (controller.selectedDevice != null &&
@@ -67,6 +70,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (oldWidget.controller == widget.controller) return;
     oldWidget.controller.removeListener(_refresh);
     controller.addListener(_refresh);
+    _httpPortController.text = '${controller.httpPort}';
     _stage =
         controller.session != null ||
             (controller.selectedDevice != null &&
@@ -84,6 +88,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     _autoRefreshTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     controller.removeListener(_refresh);
+    _httpPortController.dispose();
     super.dispose();
   }
 
@@ -127,6 +132,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: _scaffoldKey,
+      drawerScrimColor: Colors.black.withValues(alpha: 0.58),
+      endDrawer: _SettingsSideSheet(
+        controller: controller,
+        portController: _httpPortController,
+        onUsageGuide: () => _showUsageGuide(context),
+        onAbout: () => _showAbout(context),
+      ),
       body: Column(
         children: [
           _TopBar(
@@ -335,137 +348,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     patchPort.dispose();
   }
 
-  Future<void> _showNetworkSettings() async {
-    final port = TextEditingController(text: '${controller.httpPort}');
-    unawaited(controller.refreshAddresses());
-    try {
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => ListenableBuilder(
-          listenable: controller,
-          builder: (context, _) {
-            final selected =
-                controller.addresses.contains(controller.selectedAddress)
-                ? controller.selectedAddress
-                : null;
-            return AlertDialog(
-              title: const Text('设置'),
-              content: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 460),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        '网络',
-                        style: Theme.of(context).textTheme.titleSmall
-                            ?.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(height: 10),
-                      DropdownButtonFormField<String>(
-                        key: ValueKey(
-                          '${controller.addresses.join('|')}|$selected',
-                        ),
-                        initialValue: selected,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: '本机局域网地址',
-                          prefixIcon: Icon(Icons.wifi_tethering_rounded),
-                        ),
-                        hint: const Text('尚未检测到可用地址'),
-                        items: controller.addresses
-                            .map(
-                              (address) => DropdownMenuItem(
-                                value: address,
-                                child: Text(address),
-                              ),
-                            )
-                            .toList(growable: false),
-                        onChanged: controller.addresses.isEmpty
-                            ? null
-                            : controller.setAddress,
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              controller.addressStatus,
-                              style: TextStyle(
-                                color: context.mutedColor,
-                                fontSize: 11.5,
-                              ),
-                            ),
-                          ),
-                          TextButton.icon(
-                            key: const Key('refresh-addresses-button'),
-                            onPressed: controller.scanningAddresses
-                                ? null
-                                : () => controller.refreshAddresses(),
-                            icon: controller.scanningAddresses
-                                ? const SizedBox.square(
-                                    dimension: 14,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(Icons.refresh_rounded, size: 18),
-                            label: const Text('重新检测'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: port,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly,
-                        ],
-                        decoration: const InputDecoration(
-                          labelText: 'HTTP 端口',
-                          helperText: '默认 8080；冲突时自动回退',
-                          prefixIcon: Icon(Icons.http_rounded),
-                        ),
-                        onChanged: (value) =>
-                            controller.httpPort = int.tryParse(value) ?? 8080,
-                      ),
-                      const Divider(height: 28),
-                      ListTile(
-                        key: const Key('usage-guide-tile'),
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.help_outline_rounded),
-                        title: const Text('使用方法'),
-                        subtitle: const Text('查看连接、选择和发送流程'),
-                        trailing: const Icon(Icons.chevron_right_rounded),
-                        onTap: () => _showUsageGuide(dialogContext),
-                      ),
-                      ListTile(
-                        key: const Key('about-app-tile'),
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.info_outline_rounded),
-                        title: const Text('版本与许可'),
-                        subtitle: const Text('CIA Bridge · $_appVersion'),
-                        trailing: const Icon(Icons.chevron_right_rounded),
-                        onTap: () => _showAbout(dialogContext),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              actions: [
-                FilledButton(
-                  onPressed: () => Navigator.pop(dialogContext),
-                  child: const Text('完成'),
-                ),
-              ],
-            );
-          },
-        ),
-      );
-    } finally {
-      port.dispose();
+  void _showNetworkSettings() {
+    final port = '${controller.httpPort}';
+    if (_httpPortController.text != port) {
+      _httpPortController.text = port;
     }
+    unawaited(controller.refreshAddresses());
+    _scaffoldKey.currentState?.openEndDrawer();
   }
 
   void _showUsageGuide(BuildContext context) {
@@ -640,6 +529,196 @@ class _TopBar extends StatelessWidget {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsSideSheet extends StatelessWidget {
+  const _SettingsSideSheet({
+    required this.controller,
+    required this.portController,
+    required this.onUsageGuide,
+    required this.onAbout,
+  });
+
+  final TransferController controller;
+  final TextEditingController portController;
+  final VoidCallback onUsageGuide;
+  final VoidCallback onAbout;
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final compact = screenWidth < 600;
+    final panelWidth = compact ? screenWidth * 0.92 : 420.0;
+    final theme = Theme.of(context);
+
+    return Drawer(
+      key: const Key('settings-side-sheet'),
+      width: panelWidth,
+      elevation: 24,
+      backgroundColor: theme.colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.horizontal(left: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        left: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 16, 12, 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '设置',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('settings-close-button'),
+                    tooltip: '关闭设置',
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: ListenableBuilder(
+                listenable: controller,
+                builder: (context, _) {
+                  final selected =
+                      controller.addresses.contains(controller.selectedAddress)
+                      ? controller.selectedAddress
+                      : null;
+                  return SingleChildScrollView(
+                    padding: EdgeInsets.fromLTRB(
+                      compact ? 20 : 24,
+                      20,
+                      compact ? 20 : 24,
+                      28,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          '网络',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        DropdownButtonFormField<String>(
+                          key: ValueKey(
+                            '${controller.addresses.join('|')}|$selected',
+                          ),
+                          initialValue: selected,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: '本机局域网地址',
+                            prefixIcon: Icon(Icons.wifi_tethering_rounded),
+                          ),
+                          hint: const Text('尚未检测到可用地址'),
+                          items: controller.addresses
+                              .map(
+                                (address) => DropdownMenuItem(
+                                  value: address,
+                                  child: Text(address),
+                                ),
+                              )
+                              .toList(growable: false),
+                          onChanged: controller.addresses.isEmpty
+                              ? null
+                              : controller.setAddress,
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                controller.addressStatus,
+                                style: TextStyle(
+                                  color: context.mutedColor,
+                                  fontSize: 11.5,
+                                ),
+                              ),
+                            ),
+                            TextButton.icon(
+                              key: const Key('refresh-addresses-button'),
+                              onPressed: controller.scanningAddresses
+                                  ? null
+                                  : () => controller.refreshAddresses(),
+                              icon: controller.scanningAddresses
+                                  ? const SizedBox.square(
+                                      dimension: 14,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.refresh_rounded, size: 18),
+                              label: const Text('重新检测'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: portController,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
+                          decoration: const InputDecoration(
+                            labelText: 'HTTP 端口',
+                            helperText: '默认 8080；冲突时自动回退',
+                            prefixIcon: Icon(Icons.http_rounded),
+                          ),
+                          onChanged: (value) =>
+                              controller.httpPort = int.tryParse(value) ?? 8080,
+                        ),
+                        const Divider(height: 34),
+                        ListTile(
+                          key: const Key('usage-guide-tile'),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                          ),
+                          leading: const Icon(Icons.help_outline_rounded),
+                          title: const Text('使用方法'),
+                          subtitle: const Text('查看连接、选择和发送流程'),
+                          trailing: const Icon(Icons.chevron_right_rounded),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          onTap: onUsageGuide,
+                        ),
+                        const SizedBox(height: 4),
+                        ListTile(
+                          key: const Key('about-app-tile'),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                          ),
+                          leading: const Icon(Icons.info_outline_rounded),
+                          title: const Text('版本与许可'),
+                          subtitle: const Text('CIA Bridge · $_appVersion'),
+                          trailing: const Icon(Icons.chevron_right_rounded),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          onTap: onAbout,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );
