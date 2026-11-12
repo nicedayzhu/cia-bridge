@@ -12,16 +12,21 @@ and does not modify, FBI's existing TCP URL-transfer protocol.
 | Receiver port | `5001` |
 | Request bytes | `CIA_BRIDGE_DISCOVER_V1` |
 | Install-only reply | `CIA_BRIDGE_FBI_V1;tcp=5000` |
-| Patch-capable reply | `CIA_BRIDGE_FBI_V2;cia=5000;patch=5002;codecs=raw` |
+| Patch-capable reply | `CIA_BRIDGE_FBI_V2;cia=5000;patch=5002;codecs=raw;features=title-root,zlib;version=2.7.6` |
 
 A patch-capable receiver returns V2 while **Remote Install → Receive URLs over
 the network** is open. V1 remains valid for compatible install-only receivers.
 
 The `cia` and `patch` fields advertise independent control ports. The sender
 must continue using the V1 `tcp` port for regular CIA Remote Install and use
-the V2 `patch` port only for a CBPATCH1 URL. Because this unreleased protocol
-has no legacy codec requirement, CIA Bridge accepts the V2 capability only
-when `codecs` is exactly `raw`.
+the V2 `patch` port only for a CBPATCH1 URL. The required `codecs=raw` field is
+kept exactly unchanged so older senders continue to recognize a current
+receiver. Optional comma-separated `features` negotiate extensions:
+`title-root` permits records such as `code.ips` alongside `romfs/...`, and
+`zlib` permits per-record codec `1`. Unknown or absent features are ignored and
+the sender falls back to the legacy raw, RomFS-relative format. `version` is a
+display and diagnostics field; capability decisions continue to use explicit
+feature names rather than version-number comparisons.
 
 The sender broadcasts the request as ASCII bytes without a NUL, newline, or
 length prefix. A compatible FBI instance responds by unicast to the datagram's
@@ -49,8 +54,10 @@ CIA Bridge 使用无状态、带版本号的 UDP 报文，在本地 IPv4 网段�
 - CIA Bridge 发送 ASCII 请求 `CIA_BRIDGE_DISCOVER_V1`。
 - FBI 向请求来源单播回复 `CIA_BRIDGE_FBI_V1;tcp=5000`。
 - 支持补丁的接收端在同一接收界面回复
-  `CIA_BRIDGE_FBI_V2;cia=5000;patch=5002;codecs=raw`，补丁控制端口与
-  原 CIA 安装端口彼此独立。
+  `CIA_BRIDGE_FBI_V2;cia=5000;patch=5002;codecs=raw;features=title-root,zlib;version=2.7.6`，
+  补丁控制端口与原 CIA 安装端口彼此独立。`title-root` 表示可传输
+  `code.ips` 等 Title 根目录文件，`zlib` 表示支持逐文件流式解压；旧接收端
+  没有这些字段时，发送端回退为仅 RomFS 的 raw 格式。
 - CIA Bridge 使用回复报文的来源 IP，并把 `tcp` 字段作为正常发送端口。
 - 请求或回复都不包含结尾 NUL、换行或长度字段。
 

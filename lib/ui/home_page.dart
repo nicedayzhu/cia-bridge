@@ -1146,7 +1146,9 @@ class _DeviceChoiceCard extends StatelessWidget {
                     Text(
                       device.isProtocolDiscovered
                           ? device.supportsPatch
-                                ? '${device.ip} · 可接收安装文件与汉化补丁'
+                                ? '${device.ip} · FBI CIA Bridge'
+                                      '${device.receiverVersion == null ? '' : ' v${device.receiverVersion}'}'
+                                      ' · 可接收安装文件与汉化补丁'
                                 : '${device.ip} · 普通 FBI，仅支持 CIA 安装'
                           : device.isCandidate
                           ? '${device.ip} · 请与 FBI 屏幕上的 IP 核对'

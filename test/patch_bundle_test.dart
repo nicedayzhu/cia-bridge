@@ -50,7 +50,7 @@ void main() {
       ]);
 
       expect(second.bundleId, first.bundleId);
-      expect(first.bundleId, 'e86186d4f27a532f96492033ae609888');
+      expect(first.bundleId, 'c7e83694f0e3e9d71932e364321d45d4');
       for (final patch in [first, second]) {
         final header = await File(patch.file.path!)
             .openRead(48, 64)
@@ -80,10 +80,12 @@ void main() {
     final root = await Directory.systemTemp.createTemp('cbpatch_test_');
     PreparedPatch? patch;
     try {
-      final romfs = Directory(
+      final titleRoot = Directory(
         '${root.path}${Platform.pathSeparator}luma${Platform.pathSeparator}'
-        'titles${Platform.pathSeparator}0004000000194200'
-        '${Platform.pathSeparator}romfs',
+        'titles${Platform.pathSeparator}0004000000194200',
+      );
+      final romfs = Directory(
+        '${titleRoot.path}${Platform.pathSeparator}romfs',
       );
       await Directory('${romfs.path}${Platform.pathSeparator}script')
           .create(recursive: true);
@@ -93,21 +95,27 @@ void main() {
       ).writeAsBytes(List<int>.filled(4096, 0x41));
       await File('${romfs.path}${Platform.pathSeparator}boot.bin')
           .writeAsBytes(List<int>.generate(1024, (index) => index & 0xff));
+      await File('${titleRoot.path}${Platform.pathSeparator}code.ips')
+          .writeAsBytes(ascii.encode('PATCH'));
 
       patch = await const PatchBundleBuilder().build(root.path);
       expect(patch.titleId, '0004000000194200');
-      expect(patch.fileCount, 2);
-      expect(patch.rawBytes, 5120);
+      expect(patch.fileCount, 3);
+      expect(patch.rawBytes, 5125);
 
       final bytes = await File(patch.file.path!).readAsBytes();
       final header = ByteData.sublistView(bytes, 0, patchBundleHeaderSize);
       expect(ascii.decode(bytes.sublist(0, 8)), patchBundleMagic);
       expect(header.getUint32(8, Endian.little), patchBundleHeaderSize);
       expect(
+        header.getUint32(12, Endian.little),
+        patchBundleFlagTitleRootPaths,
+      );
+      expect(
         header.getUint64(16, Endian.little).toRadixString(16).padLeft(16, '0'),
         '0004000000194200',
       );
-      expect(header.getUint32(24, Endian.little), 2);
+      expect(header.getUint32(24, Endian.little), 3);
       expect(_hex(bytes.sublist(48, 64)), patch.bundleId);
       final crc = Crc32()..add(bytes.sublist(0, 64));
       expect(header.getUint32(64, Endian.little), crc.value);
@@ -115,7 +123,7 @@ void main() {
       var offset = patchBundleHeaderSize;
       final restored = <String, List<int>>{};
       final codecs = <PatchCodec>[];
-      for (var index = 0; index < 2; index++) {
+      for (var index = 0; index < 3; index++) {
         final record = ByteData.sublistView(
           bytes,
           offset,
@@ -132,18 +140,25 @@ void main() {
         offset += pathLength;
         final stored = bytes.sublist(offset, offset + storedSize);
         offset += storedSize;
-        expect(codec, PatchCodec.raw);
-        final raw = stored;
+        final raw = switch (codec) {
+          PatchCodec.raw => stored,
+          PatchCodec.zlib => ZLibCodec().decode(stored),
+        };
         expect(raw.length, rawSize);
         final actualCrc = Crc32()..add(raw);
         expect(actualCrc.value, expectedCrc);
         restored[path] = raw;
       }
 
-      expect(restored.keys, ['boot.bin', 'script/dialog.bin']);
-      expect(restored['script/dialog.bin'], List<int>.filled(4096, 0x41));
-      expect(codecs, everyElement(PatchCodec.raw));
-      expect(patch.storedBytes, patch.rawBytes);
+      expect(restored.keys, [
+        'code.ips',
+        'romfs/boot.bin',
+        'romfs/script/dialog.bin',
+      ]);
+      expect(restored['code.ips'], ascii.encode('PATCH'));
+      expect(restored['romfs/script/dialog.bin'], List<int>.filled(4096, 0x41));
+      expect(codecs, contains(PatchCodec.zlib));
+      expect(patch.storedBytes, lessThan(patch.rawBytes));
       expect(offset, bytes.length);
     } finally {
       if (patch != null) await patch.delete();
@@ -185,6 +200,12 @@ void main() {
             'translated text',
           ),
         )
+        ..addFile(
+          ArchiveFile.string(
+            'Corpse Party patch/luma/titles/0004000000194200/code.ips',
+            'PATCH',
+          ),
+        )
         ..addFile(ArchiveFile.string('Corpse Party patch/README.txt', 'help'));
       final zip = File('${root.path}${Platform.pathSeparator}corpse-party.zip');
       await zip.writeAsBytes(ZipEncoder().encode(archive));
@@ -192,9 +213,12 @@ void main() {
       patch = await const PatchBundleBuilder().build(zip.path);
 
       expect(patch.titleId, '0004000000194200');
-      expect(patch.fileCount, 1);
+      expect(patch.fileCount, 2);
       expect(patch.sourceLabel, 'corpse-party');
-      expect(patch.rawBytes, utf8.encode('translated text').length);
+      expect(
+        patch.rawBytes,
+        utf8.encode('translated text').length + ascii.encode('PATCH').length,
+      );
     } finally {
       if (patch != null) await patch.delete();
       if (await root.exists()) await root.delete(recursive: true);
@@ -223,6 +247,80 @@ void main() {
       await expectLater(
         const PatchBundleBuilder().build(zip.path),
         throwsA(isA<FormatException>()),
+      );
+    } finally {
+      if (await root.exists()) await root.delete(recursive: true);
+    }
+  });
+
+  test('keeps legacy raw romfs-only bundles compatible', () async {
+    final root = await Directory.systemTemp.createTemp('cbpatch_legacy_');
+    PreparedPatch? patch;
+    try {
+      final archive = Archive()
+        ..addFile(
+          ArchiveFile.string(
+            'luma/titles/0004000000194200/romfs/file.bin',
+            'legacy',
+          ),
+        );
+      final zip = File('${root.path}${Platform.pathSeparator}legacy.zip');
+      await zip.writeAsBytes(ZipEncoder().encode(archive));
+
+      patch = await const PatchBundleBuilder().build(
+        zip.path,
+        options: const PatchBuildOptions(),
+      );
+      final bytes = await File(patch.file.path!).readAsBytes();
+      final header = ByteData.sublistView(bytes, 0, patchBundleHeaderSize);
+      final record = ByteData.sublistView(
+        bytes,
+        patchBundleHeaderSize,
+        patchBundleHeaderSize + patchBundleRecordHeaderSize,
+      );
+      final pathLength = record.getUint16(0, Endian.little);
+      final pathStart = patchBundleHeaderSize + patchBundleRecordHeaderSize;
+
+      expect(header.getUint32(12, Endian.little), 0);
+      expect(record.getUint8(2), PatchCodec.raw.index);
+      expect(
+        utf8.decode(bytes.sublist(pathStart, pathStart + pathLength)),
+        'file.bin',
+      );
+    } finally {
+      if (patch != null) await patch.delete();
+      if (await root.exists()) await root.delete(recursive: true);
+    }
+  });
+
+  test('refuses to silently drop code.ips for a legacy receiver', () async {
+    final root = await Directory.systemTemp.createTemp('cbpatch_legacy_ips_');
+    try {
+      final archive = Archive()
+        ..addFile(
+          ArchiveFile.string(
+            'luma/titles/0004000000194200/romfs/file.bin',
+            'legacy',
+          ),
+        )
+        ..addFile(
+          ArchiveFile.string('luma/titles/0004000000194200/code.ips', 'PATCH'),
+        );
+      final zip = File('${root.path}${Platform.pathSeparator}legacy-ips.zip');
+      await zip.writeAsBytes(ZipEncoder().encode(archive));
+
+      await expectLater(
+        const PatchBundleBuilder().build(
+          zip.path,
+          options: const PatchBuildOptions(),
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            contains('code.ips'),
+          ),
+        ),
       );
     } finally {
       if (await root.exists()) await root.delete(recursive: true);

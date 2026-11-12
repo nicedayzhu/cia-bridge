@@ -170,6 +170,9 @@ class NearbyDevice {
     required this.mac,
     this.port = 5000,
     this.patchPort,
+    this.receiverVersion,
+    this.supportsPatchTitleRoot = false,
+    this.supportsPatchZlib = false,
     this.isManual = false,
     this.isCandidate = false,
     this.isProtocolDiscovered = false,
@@ -179,6 +182,9 @@ class NearbyDevice {
   final String mac;
   final int port;
   final int? patchPort;
+  final String? receiverVersion;
+  final bool supportsPatchTitleRoot;
+  final bool supportsPatchZlib;
   final bool isManual;
   final bool isCandidate;
   final bool isProtocolDiscovered;

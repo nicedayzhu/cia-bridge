@@ -13,9 +13,20 @@ const patchBundleHeaderSize = 72;
 const patchBundleRecordHeaderSize = 24;
 const patchBundleMaxPathBytes = 1024;
 const patchReceiverMaxRelativePathBytes = 384;
+const patchBundleFlagTitleRootPaths = 1;
 const _patchBundleContentIdDomain = 'CBPATCH1-CONTENT-ID-V1\u0000';
+const _patchCompressionMinSavings = 32;
 
-enum PatchCodec { raw }
+enum PatchCodec { raw, zlib }
+
+class PatchBuildOptions {
+  const PatchBuildOptions({this.titleRootPaths = false, this.zlib = false});
+
+  static const latest = PatchBuildOptions(titleRootPaths: true, zlib: true);
+
+  final bool titleRootPaths;
+  final bool zlib;
+}
 
 class PatchInput {
   const PatchInput.local(
@@ -106,19 +117,22 @@ class PatchBundleBuilder {
   Future<PreparedPatch> build(
     String selectedPath, {
     PatchBuildProgress? onProgress,
+    PatchBuildOptions options = PatchBuildOptions.latest,
   }) => buildInput(
     PatchInput.local(selectedPath, label: _basename(selectedPath)),
     onProgress: onProgress,
+    options: options,
   );
 
   Future<PreparedPatch> buildInput(
     PatchInput input, {
     PatchBuildProgress? onProgress,
+    PatchBuildOptions options = PatchBuildOptions.latest,
   }) async {
     _PatchSource? source;
     try {
       if (input.localPath != null) {
-        source = await _openLocalSource(input);
+        source = await _openLocalSource(input, options);
       } else {
         final titleId = input.titleId?.toUpperCase();
         if (titleId == null || !_isTitleId(titleId)) {
@@ -131,7 +145,9 @@ class PatchBundleBuilder {
           files: input.files
               .map(
                 (file) => _PatchFile(
-                  relativePath: file.relativePath,
+                  relativePath: options.titleRootPaths
+                      ? 'romfs/${file.relativePath}'
+                      : file.relativePath,
                   size: file.size,
                   openRead: file.openRead,
                   expectedCrc32: file.expectedCrc32,
@@ -141,21 +157,28 @@ class PatchBundleBuilder {
         );
       }
       _validateFiles(source.files);
-      return await _buildSource(source, onProgress: onProgress);
+      return await _buildSource(
+        source,
+        options: options,
+        onProgress: onProgress,
+      );
     } finally {
       await source?.close();
     }
   }
 
-  Future<_PatchSource> _openLocalSource(PatchInput input) async {
+  Future<_PatchSource> _openLocalSource(
+    PatchInput input,
+    PatchBuildOptions options,
+  ) async {
     final path = input.localPath!;
     final type = await FileSystemEntity.type(path, followLinks: false);
     if (type == FileSystemEntityType.directory) {
-      return _openDirectorySource(Directory(path), input.label);
+      return _openDirectorySource(Directory(path), input.label, options);
     }
     if (type == FileSystemEntityType.file &&
         path.toLowerCase().endsWith('.zip')) {
-      return _openZipSource(File(path), input.label);
+      return _openZipSource(File(path), input.label, options);
     }
     if (type == FileSystemEntityType.link) {
       throw FileSystemException('补丁来源不能是符号链接', path);
@@ -166,9 +189,10 @@ class PatchBundleBuilder {
   Future<_PatchSource> _openDirectorySource(
     Directory selected,
     String label,
+    PatchBuildOptions options,
   ) async {
     final target = await _locateRomfs(selected);
-    final files = await _collectDirectoryFiles(target.romfs);
+    final files = await _collectDirectoryFiles(target, options);
     return _PatchSource(
       titleId: target.titleId,
       label: label,
@@ -177,7 +201,11 @@ class PatchBundleBuilder {
     );
   }
 
-  Future<_PatchSource> _openZipSource(File zipFile, String label) async {
+  Future<_PatchSource> _openZipSource(
+    File zipFile,
+    String label,
+    PatchBuildOptions options,
+  ) async {
     final input = InputFileStream(zipFile.path);
     try {
       final archive = ZipDecoder().decodeStream(
@@ -195,11 +223,13 @@ class PatchBundleBuilder {
         }
         roots.add(match.rootKey);
         if (!entry.isFile || match.relativePath.isEmpty) continue;
-        _validateRelativePath(match.relativePath);
+        if (_isReservedTitlePath(match.relativePath)) continue;
+        final relativePath = _pathForOptions(match.relativePath, options);
+        _validateRelativePath(relativePath);
         final files = targets.putIfAbsent(match.titleId, () => []);
         files.add(
           _PatchFile(
-            relativePath: match.relativePath,
+            relativePath: relativePath,
             size: entry.size,
             expectedCrc32: entry.crc32,
             materialize: (target) async {
@@ -214,9 +244,7 @@ class PatchBundleBuilder {
         );
       }
       if (targets.isEmpty) {
-        throw const FormatException(
-          'ZIP 中没有找到 luma/titles/<Title ID>/romfs 补丁目录',
-        );
+        throw const FormatException('ZIP 中没有找到 luma/titles/<Title ID> 补丁文件');
       }
       if (targets.length > 1) {
         final ids = targets.keys.toList()..sort();
@@ -225,7 +253,7 @@ class PatchBundleBuilder {
         );
       }
       if (roots.length > 1) {
-        throw const FormatException('ZIP 包含多个 LayeredFS romfs 根目录。请一次只选择一个补丁。');
+        throw const FormatException('ZIP 包含多个 LayeredFS 标题根目录。请一次只选择一个补丁。');
       }
       final titleId = targets.keys.single;
       return _PatchSource(
@@ -243,6 +271,7 @@ class PatchBundleBuilder {
 
   Future<PreparedPatch> _buildSource(
     _PatchSource source, {
+    required PatchBuildOptions options,
     PatchBuildProgress? onProgress,
   }) async {
     final files = source.files;
@@ -259,6 +288,9 @@ class PatchBundleBuilder {
     );
     final sourceScratch = File(
       '${temporary.path}${Platform.pathSeparator}payload.raw.tmp',
+    );
+    final compressedScratch = File(
+      '${temporary.path}${Platform.pathSeparator}payload.zlib.tmp',
     );
 
     RandomAccessFile? output;
@@ -298,21 +330,56 @@ class PatchBundleBuilder {
         await output.writeFrom(Uint8List(patchBundleRecordHeaderSize));
         await output.writeFrom(pathBytes);
 
-        // Fast-install path: ZIP decompression stays on the phone/PC and the
-        // 3DS receives raw records that can be written directly to SD. Reserve
-        // the record header and back-fill its CRC so the source is copied and
-        // hashed in one pass.
+        // ZIP decompression and optional per-file zlib compression stay on the
+        // faster phone/PC. The 3DS inflates compressed records directly into
+        // the final file and never stages the source ZIP on SD.
         final crc = Crc32();
         var payloadSize = 0;
-        await for (final chunk in sourceFile.openRead()) {
-          crc.add(chunk);
-          payloadSize += chunk.length;
-          await output.writeFrom(chunk);
+        var rawSize = 0;
+        var codec = PatchCodec.raw;
+        if (options.zlib && entry.size > _patchCompressionMinSavings) {
+          if (await compressedScratch.exists()) {
+            await compressedScratch.delete();
+          }
+          final compressedOutput = compressedScratch.openWrite();
+          final encoder = ZLibCodec(level: 6).encoder
+              .startChunkedConversion(compressedOutput);
+          try {
+            await for (final chunk in sourceFile.openRead()) {
+              crc.add(chunk);
+              rawSize += chunk.length;
+              encoder.add(chunk);
+            }
+          } finally {
+            encoder.close();
+            await compressedOutput.done;
+          }
+          final compressedSize = await compressedScratch.length();
+          if (compressedSize + _patchCompressionMinSavings < rawSize) {
+            codec = PatchCodec.zlib;
+            payloadSize = compressedSize;
+            await for (final chunk in compressedScratch.openRead()) {
+              await output.writeFrom(chunk);
+            }
+          } else {
+            payloadSize = 0;
+            await for (final chunk in sourceFile.openRead()) {
+              payloadSize += chunk.length;
+              await output.writeFrom(chunk);
+            }
+          }
+        } else {
+          await for (final chunk in sourceFile.openRead()) {
+            crc.add(chunk);
+            rawSize += chunk.length;
+            payloadSize += chunk.length;
+            await output.writeFrom(chunk);
+          }
         }
-        if (payloadSize != entry.size) {
+        if (rawSize != entry.size) {
           throw FormatException(
             'Patch file size changed while reading: ${entry.relativePath} '
-            '(${entry.size} != $payloadSize)',
+            '(${entry.size} != $rawSize)',
           );
         }
         if (entry.expectedCrc32 != null && crc.value != entry.expectedCrc32) {
@@ -331,7 +398,7 @@ class PatchBundleBuilder {
 
         final record = ByteData(patchBundleRecordHeaderSize)
           ..setUint16(0, pathBytes.length, Endian.little)
-          ..setUint8(2, PatchCodec.raw.index)
+          ..setUint8(2, codec.index)
           ..setUint8(3, 0)
           ..setUint64(4, entry.size, Endian.little)
           ..setUint64(12, payloadSize, Endian.little)
@@ -344,6 +411,9 @@ class PatchBundleBuilder {
         if (sourceFile.path == sourceScratch.path &&
             await sourceScratch.exists()) {
           await sourceScratch.delete();
+        }
+        if (await compressedScratch.exists()) {
+          await compressedScratch.delete();
         }
         onProgress?.call(index + 1, files.length, entry.relativePath);
       }
@@ -358,7 +428,11 @@ class PatchBundleBuilder {
       header.buffer.asUint8List().setAll(0, ascii.encode(patchBundleMagic));
       header
         ..setUint32(8, patchBundleHeaderSize, Endian.little)
-        ..setUint32(12, 0, Endian.little)
+        ..setUint32(
+          12,
+          options.titleRootPaths ? patchBundleFlagTitleRootPaths : 0,
+          Endian.little,
+        )
         ..setUint64(16, int.parse(source.titleId, radix: 16), Endian.little)
         ..setUint32(24, files.length, Endian.little)
         ..setUint32(28, 0, Endian.little)
@@ -375,6 +449,7 @@ class PatchBundleBuilder {
       await output.close();
       output = null;
       if (await sourceScratch.exists()) await sourceScratch.delete();
+      if (await compressedScratch.exists()) await compressedScratch.delete();
 
       final bundleFile = await stagedBundleFile.rename(
         '${temporary.path}${Platform.pathSeparator}'
@@ -460,7 +535,11 @@ class PatchBundleBuilder {
     if (name == 'romfs' && await directory.exists()) {
       final titleId = _basename(directory.parent.path).toUpperCase();
       if (_isTitleId(titleId)) {
-        return _PatchTarget(titleId, directory.absolute);
+        return _PatchTarget(
+          titleId,
+          directory.parent.absolute,
+          directory.absolute,
+        );
       }
     }
 
@@ -468,7 +547,11 @@ class PatchBundleBuilder {
     if (_isTitleId(selectedName)) {
       final romfs = Directory(_join(directory.path, 'romfs'));
       if (await romfs.exists()) {
-        return _PatchTarget(selectedName.toUpperCase(), romfs.absolute);
+        return _PatchTarget(
+          selectedName.toUpperCase(),
+          directory.absolute,
+          romfs.absolute,
+        );
       }
     }
     return null;
@@ -486,13 +569,16 @@ class PatchBundleBuilder {
         _basename(title.parent.parent.path).toLowerCase() != 'luma') {
       return null;
     }
-    return _PatchTarget(titleId, romfs.absolute);
+    return _PatchTarget(titleId, title.absolute, romfs.absolute);
   }
 
-  Future<List<_PatchFile>> _collectDirectoryFiles(Directory romfs) async {
-    final root = romfs.absolute.path;
+  Future<List<_PatchFile>> _collectDirectoryFiles(
+    _PatchTarget target,
+    PatchBuildOptions options,
+  ) async {
+    final root = target.titleRoot.absolute.path;
     final files = <_PatchFile>[];
-    await for (final entity in romfs.list(
+    await for (final entity in target.titleRoot.list(
       recursive: true,
       followLinks: false,
     )) {
@@ -505,9 +591,11 @@ class PatchBundleBuilder {
       final relative = entity.absolute.path
           .substring(root.length + 1)
           .replaceAll('\\', '/');
+      if (_isReservedTitlePath(relative)) continue;
+      final patchPath = _pathForOptions(relative, options);
       files.add(
         _PatchFile(
-          relativePath: relative,
+          relativePath: patchPath,
           size: await file.length(),
           localFile: file,
         ),
@@ -515,6 +603,26 @@ class PatchBundleBuilder {
     }
     return files;
   }
+
+  String _pathForOptions(String titleRelative, PatchBuildOptions options) {
+    if (options.titleRootPaths) return titleRelative;
+    final segments = titleRelative.split('/');
+    if (segments.isEmpty || segments.first.toLowerCase() != 'romfs') {
+      throw FormatException(
+        '当前 3DS 接收端没有回报 title-root 能力，不能安全传输：$titleRelative。'
+        '请在 3DS 上关闭并重新进入“Receive URLs over the network”，然后重新扫描设备；'
+        '若仍出现此提示，请确认启动的是刚安装的 FBI CIA Bridge。',
+      );
+    }
+    final relative = segments.skip(1).join('/');
+    if (relative.isEmpty) {
+      throw FormatException('补丁包含无效的 romfs 路径：$titleRelative');
+    }
+    return relative;
+  }
+
+  bool _isReservedTitlePath(String path) =>
+      path.toLowerCase() == '.cia-bridge-cache';
 
   _ArchivePathMatch? _matchArchivePath(String rawPath) {
     final normalized = rawPath.replaceAll('\\', '/');
@@ -529,18 +637,17 @@ class PatchBundleBuilder {
     if (segments.any((part) => part == '.' || part == '..')) {
       throw FormatException('ZIP 包含不安全路径：$rawPath');
     }
-    for (var index = 0; index + 3 < segments.length; index++) {
+    for (var index = 0; index + 2 < segments.length; index++) {
       if (segments[index].toLowerCase() != 'luma' ||
           segments[index + 1].toLowerCase() != 'titles' ||
-          !_isTitleId(segments[index + 2]) ||
-          segments[index + 3].toLowerCase() != 'romfs') {
+          !_isTitleId(segments[index + 2])) {
         continue;
       }
       return _ArchivePathMatch(
         segments[index + 2].toUpperCase(),
-        segments.skip(index + 4).join('/'),
+        segments.skip(index + 3).join('/'),
         segments
-            .take(index + 4)
+            .take(index + 3)
             .map((segment) => segment.toLowerCase())
             .join('/'),
       );
@@ -669,9 +776,10 @@ class _PatchSource {
 }
 
 class _PatchTarget {
-  const _PatchTarget(this.titleId, this.romfs);
+  const _PatchTarget(this.titleId, this.titleRoot, this.romfs);
 
   final String titleId;
+  final Directory titleRoot;
   final Directory romfs;
 }
 

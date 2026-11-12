@@ -472,6 +472,7 @@ void main() {
       ip: '192.168.0.103',
       mac: '',
       patchPort: 5002,
+      receiverVersion: '2.7.6',
       isProtocolDiscovered: true,
     );
     final controller = TransferController()
@@ -488,7 +489,10 @@ void main() {
     );
 
     expect(find.text('已就绪'), findsOneWidget);
-    expect(find.text('192.168.0.103 · 可接收安装文件与汉化补丁'), findsOneWidget);
+    expect(
+      find.text('192.168.0.103 · FBI CIA Bridge v2.7.6 · 可接收安装文件与汉化补丁'),
+      findsOneWidget,
+    );
     await tester.tap(find.text('选择'));
     await tester.pumpAndSettle();
 

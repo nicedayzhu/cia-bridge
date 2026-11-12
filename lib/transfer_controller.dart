@@ -226,11 +226,18 @@ class TransferController extends ChangeNotifier {
     if (input == null) return;
 
     buildingPatch = true;
-    status = '正在扫描并准备 LayeredFS 快速安装流…';
+    status = '正在刷新 3DS 补丁能力…';
     _notify();
     try {
+      await _refreshSelectedPatchCapabilities();
+      status = '正在扫描并准备 LayeredFS 快速安装流…';
+      _notify();
       final next = await _patchBuilder.buildInput(
         input,
+        options: PatchBuildOptions(
+          titleRootPaths: selectedDevice?.supportsPatchTitleRoot ?? false,
+          zlib: selectedDevice?.supportsPatchZlib ?? false,
+        ),
         onProgress: (completed, total, path) {
           if (completed == total || completed % 50 == 0) {
             status = '正在打包补丁 $completed / $total · $path';
@@ -254,6 +261,45 @@ class TransferController extends ChangeNotifier {
       await input.dispose();
       buildingPatch = false;
       _notify();
+    }
+  }
+
+  Future<void> _refreshSelectedPatchCapabilities() async {
+    final current = selectedDevice;
+    final address = selectedAddress;
+    if (current == null ||
+        address == null ||
+        !current.supportsPatch ||
+        current.supportsPatchTitleRoot) {
+      return;
+    }
+
+    try {
+      final found = await _scanDevices(address);
+      final refreshed = found
+          .where(
+            (device) =>
+                device.ip == current.ip &&
+                device.isProtocolDiscovered &&
+                device.supportsPatch,
+          )
+          .firstOrNull;
+      if (refreshed == null) return;
+
+      selectedDevice = refreshed;
+      targetIp = refreshed.ip;
+      targetPort = refreshed.patchPort!;
+      devices = [
+        for (final device in devices)
+          if (device.ip == refreshed.ip) refreshed else device,
+      ];
+      if (!devices.any((device) => device.ip == refreshed.ip)) {
+        devices = [refreshed, ...devices];
+      }
+    } catch (_) {
+      // Keep the previously discovered capabilities. If the selected patch
+      // needs a newer feature, bundle validation will stop before transfer and
+      // report the exact missing capability instead of omitting a file.
     }
   }
 
@@ -288,9 +334,13 @@ class TransferController extends ChangeNotifier {
 
   String _patchReadyStatus(PreparedPatch patch) {
     final name = patchTitleInfo?.name ?? patch.sourceLabel;
+    final sizeText = patch.storedBytes < patch.rawBytes
+        ? '${formatBytes(patch.rawBytes)} 原始 / '
+              '${formatBytes(patch.storedBytes)} 传输'
+        : '${formatBytes(patch.rawBytes)} raw 传输';
     return '已准备 $name · Title ID ${patch.titleId} · '
         '${patch.fileCount} 个文件 · '
-        '${formatBytes(patch.rawBytes)} · raw 快速安装';
+        '$sizeText · 快速增量安装';
   }
 
   Future<void> _inspectCia(String id) async {
@@ -463,6 +513,8 @@ class TransferController extends ChangeNotifier {
       mac: '',
       port: port,
       patchPort: patchPort,
+      supportsPatchTitleRoot: patchPort != null,
+      supportsPatchZlib: patchPort != null,
       isManual: true,
     );
     devices = [manual, ...devices.where((device) => device.ip != trimmed)];

@@ -145,6 +145,84 @@ void main() {
     }
   });
 
+  test('refreshes stale patch capabilities before building a ZIP', () async {
+    final root = await Directory.systemTemp.createTemp(
+      'controller_patch_refresh_',
+    );
+    final archive = Archive()
+      ..addFile(
+        ArchiveFile.string('luma/titles/0004000000194200/code.ips', 'PATCH'),
+      )
+      ..addFile(
+        ArchiveFile.string(
+          'luma/titles/0004000000194200/romfs/file.bin',
+          'localized',
+        ),
+      );
+    final zip = File('${root.path}${Platform.pathSeparator}patch.zip');
+    await zip.writeAsBytes(ZipEncoder().encode(archive));
+    final bridge = _FakeBridge([
+      ShareFile(
+        id: zip.path,
+        name: 'patch.zip',
+        size: await zip.length(),
+        path: zip.path,
+      ),
+    ]);
+    const staleReceiver = NearbyDevice(
+      ip: '192.168.0.103',
+      mac: '',
+      port: 5000,
+      patchPort: 5002,
+      isProtocolDiscovered: true,
+    );
+    const refreshedReceiver = NearbyDevice(
+      ip: '192.168.0.103',
+      mac: '',
+      port: 5000,
+      patchPort: 5002,
+      receiverVersion: '2.7.6',
+      supportsPatchTitleRoot: true,
+      supportsPatchZlib: true,
+      isProtocolDiscovered: true,
+    );
+    var scans = 0;
+    final controller =
+        TransferController(
+            bridge: bridge,
+            deviceScanner: (address) async {
+              scans++;
+              expect(address, '192.168.0.104');
+              return const [refreshedReceiver];
+            },
+          )
+          ..addresses = ['192.168.0.104']
+          ..selectedAddress = '192.168.0.104'
+          ..selectDevice(staleReceiver);
+    try {
+      await controller.pickFiles();
+
+      expect(scans, 1);
+      expect(controller.selectedDevice, refreshedReceiver);
+      expect(controller.selectedDevice?.receiverVersion, '2.7.6');
+      expect(controller.preparedPatch?.fileCount, 2);
+      final bundle = await File(controller.preparedPatch!.file.path!)
+          .open(mode: FileMode.read);
+      try {
+        await bundle.setPosition(12);
+        final flags = ByteData.sublistView(
+          Uint8List.fromList(await bundle.read(4)),
+        ).getUint32(0, Endian.little);
+        expect(flags, 1);
+      } finally {
+        await bundle.close();
+      }
+    } finally {
+      controller.dispose();
+      if (await root.exists()) await root.delete(recursive: true);
+    }
+  });
+
   test(
     'rejects a patch ZIP when the selected FBI has no patch capability',
     () async {

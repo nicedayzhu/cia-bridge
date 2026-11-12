@@ -13,7 +13,7 @@ CIA Bridge is a modern LAN sender for FBI Remote Install on Nintendo 3DS. It run
 - Direct streaming from Windows files and Android `content://` URIs without loading an entire CIA into memory.
 - Offline CIA details such as title icon, localized name, Title ID, version, region, and content type.
 - FBI push and QR-code installation for `.cia`, `.tik`, `.cetk`, and `.3dsx` files.
-- LayeredFS patch ZIP detection by Title ID, deterministic streaming, CRC32 verification, and incremental writes that skip unchanged content.
+- Luma3DS patch ZIP detection by Title ID, including `code.ips` and `romfs`, with negotiated per-file compression, CRC32 verification, and incremental writes that skip unchanged content.
 - Android foreground transfers and a native Windows build with no Java or JRE dependency.
 
 CIA details come from the file's TMD and optional SMDH metadata. Metadata errors never make the file unsendable. Patch names use the detected Title ID and the bundled offline catalog; only an unknown ID may trigger a small, non-blocking lookup.
@@ -48,7 +48,7 @@ The Windows executable must remain beside its `data` directory and Flutter runti
 
 ### Stream a LayeredFS localization patch (Windows and Android)
 
-1. Select one ZIP containing `luma/titles/<16-digit Title ID>/romfs/...`. Outer wrapper folders and README files are allowed; one selection must contain only one Title ID.
+1. Select one ZIP containing `luma/titles/<16-digit Title ID>/...`. Both `code.ips` and `romfs/...` are supported. Outer wrapper folders and README files are allowed; one selection must contain only one Title ID.
 2. On the 3DS, open **FBI → Remote Install → Receive URLs over the network**. A compatible receiver advertises both the install and patch ports.
 3. Review the detected game, Title ID, and file count in CIA Bridge, send the patch, and confirm on the 3DS.
 

@@ -18,7 +18,9 @@ void main() {
 
   test('parses the patch receiver V2 ports and capabilities', () {
     final device = parseFbiDiscoveryResponse(
-      payload: 'CIA_BRIDGE_FBI_V2;cia=5000;patch=5002;codecs=raw',
+      payload:
+          'CIA_BRIDGE_FBI_V2;cia=5000;patch=5002;codecs=raw;'
+          'features=title-root,zlib;version=2.7.6',
       sourceIp: '192.168.0.103',
       localAddress: '192.168.0.104',
     );
@@ -27,6 +29,9 @@ void main() {
     expect(device!.port, 5000);
     expect(device.patchPort, 5002);
     expect(device.supportsPatch, isTrue);
+    expect(device.receiverVersion, '2.7.6');
+    expect(device.supportsPatchTitleRoot, isTrue);
+    expect(device.supportsPatchZlib, isTrue);
   });
 
   test('rejects malformed, local, and cross-subnet discovery replies', () {

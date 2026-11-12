@@ -48,7 +48,7 @@ Windows 可执行文件必须与 `data` 目录和 Flutter 运行库保持在一�
 
 ### 流式发送 LayeredFS 汉化补丁（Windows 与 Android）
 
-1. 选择一个包含 `luma/titles/<16 位 Title ID>/romfs/...` 的 ZIP。允许外层包装目录和 README，但一次选择只能包含一个 Title ID。
+1. 选择一个包含 `luma/titles/<16 位 Title ID>/...` 的 ZIP；支持同级的 `code.ips` 和 `romfs/...`。允许外层包装目录和 README，但一次选择只能包含一个 Title ID。
 2. 在 3DS 打开 `FBI → Remote Install → Receive URLs over the network`；兼容接收端会同时公布安装与补丁端口。
 3. 在 CIA Bridge 核对游戏名、Title ID 和文件数量，发送后在 3DS 确认。
 

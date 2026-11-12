@@ -8,6 +8,8 @@ const fbiDiscoveryPort = 5001;
 const fbiDiscoveryRequest = 'CIA_BRIDGE_DISCOVER_V1';
 const fbiDiscoveryResponsePrefix = 'CIA_BRIDGE_FBI_V1;tcp=';
 const fbiDiscoveryV2Prefix = 'CIA_BRIDGE_FBI_V2;';
+const patchFeatureTitleRoot = 'title-root';
+const patchFeatureZlib = 'zlib';
 
 class DeviceDiscovery {
   static const _protocolMissGraceScans = 2;
@@ -241,11 +243,18 @@ NearbyDevice? parseFbiDiscoveryResponse({
     final ciaPort = _validPort(fields['cia']) ?? 5000;
     final patchPort = _validPort(fields['patch']);
     if (patchPort == null || fields['codecs'] != 'raw') return null;
+    final features = (fields['features'] ?? '')
+        .split(',')
+        .where((feature) => feature.isNotEmpty)
+        .toSet();
     return NearbyDevice(
       ip: sourceIp,
       mac: '',
       port: ciaPort,
       patchPort: patchPort,
+      receiverVersion: _validReceiverVersion(fields['version']),
+      supportsPatchTitleRoot: features.contains(patchFeatureTitleRoot),
+      supportsPatchZlib: features.contains(patchFeatureZlib),
       isProtocolDiscovered: true,
     );
   }
@@ -267,6 +276,13 @@ int? _validPort(String? text) {
   if (text == null || !RegExp(r'^\d{1,5}$').hasMatch(text)) return null;
   final value = int.tryParse(text);
   return value != null && value >= 1 && value <= 65535 ? value : null;
+}
+
+String? _validReceiverVersion(String? text) {
+  if (text == null || !RegExp(r'^\d+\.\d+\.\d+$').hasMatch(text)) {
+    return null;
+  }
+  return text;
 }
 
 List<NearbyDevice> devicesFromNeighbors(

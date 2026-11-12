@@ -2,9 +2,12 @@
 
 ## Measured baseline
 
-The reference localization patch contains 127 files and 18,108,898 raw bytes.
-Two instrumented runs on the reference New Nintendo 3DS isolate different
-costs:
+The original Corpse Party benchmark measured only its 127 `romfs` files and
+18,108,898 raw bytes. The source archive actually contains 128 title files and
+18,108,924 bytes: the previous sender silently omitted a 26-byte `code.ips`.
+The timing table below remains a valid RomFS performance baseline, but not a
+complete-patch correctness result. Two instrumented runs on the reference New
+Nintendo 3DS isolate different costs:
 
 | Run | Total | Compare | Setup | Write | Calls | Result |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
@@ -127,19 +130,26 @@ calls, skipped bytes, cluster size, SD high-speed/clock state, and whether the
 completion marker was saved. A cache hit has a compact dedicated report so the
 small bottom screen does not wrap or clip diagnostic lines.
 
-## Why the receiver does not stage a ZIP
+## Streaming compression instead of staging a ZIP
 
-The measured patch compresses to about 2.67 MiB, only 14.7% of its raw size.
-Staging that ZIP would make the network phase look fast, but Stock Luma still
-requires real files under `/luma/titles/<Title ID>/romfs`. The receiver would
-then perform a temporary ZIP write, read it back, inflate 18.1 MiB, and finally
-perform the same 127 destination-file writes. It also removes the overlap
-between network reception and installation.
+Staging a ZIP would make the network phase look fast, but Luma3DS still requires
+real files under `/luma/titles/<Title ID>`. The receiver would then perform a
+temporary ZIP write, read it back, inflate it, and finally perform the same
+destination-file writes. It would also remove the overlap between network
+reception and installation.
 
-If compression becomes useful, it should be per-record streaming compression:
-receive compressed bytes, inflate into a bounded buffer, and write the final
-file without a temporary archive. The zlib API is designed for this bounded
-streaming model: <https://zlib.net/manual.html>.
+The implemented path instead negotiates per-record zlib compression. The sender
+compresses each file independently and keeps codec `1` only when it saves at
+least 32 bytes. FBI inflates directly into its reusable bounded write buffer,
+calculates CRC32 over the uncompressed bytes, and writes the final destination
+without a temporary archive.
+
+The real AFM final patch contains 97 title files and 38,125,562 raw bytes,
+including the 5,130-byte `code.ips`. The current builder produced 20,029,244
+stored payload bytes and a 20,034,166-byte complete CBPATCH1 bundle, a 47.5%
+payload reduction. All 97 records selected zlib in that build. This reduces the
+wire phase; it does not remove the final SD/FAT writes, so hardware acceptance
+must still measure the CPU/network tradeoff on a console.
 
 ## 3dsDL source review and decision
 
@@ -166,13 +176,11 @@ Two parts are deliberately not migrated:
   remained about 233 seconds, so it moved allocation cost rather than removing
   it.
 
-Per-record DEFLATE was also evaluated as a separate experiment. This patch's
-existing ZIP is about 2.65 MiB versus 17.27 MiB raw, so at the observed network
-rate it could save roughly 15-20 seconds. It would not reduce the dominant
-destination-file allocation/write time and would add a new decoder state and
-failure surface. It is therefore not included in the current production test
-build. Reconsider it only after the redundant post-write size-query fix is
-measured and network transfer becomes a material share of the new total.
+Per-record DEFLATE is now included as negotiated codec `1`. It does not reduce
+the dominant destination-file allocation/write time, but it avoids staging a
+ZIP and substantially reduces the AFM wire payload. Legacy receivers continue
+to receive codec `0`; a sender refuses a legacy transfer that would otherwise
+omit a title-root file such as `code.ips`.
 
 3dsDL is GPLv3. This review uses performance concepts and measurements only;
 no 3dsDL implementation code is copied into the FBI-derived project.
@@ -200,11 +208,11 @@ fallback.
 - Record total, compare, setup, write, close, call count, written MiB, and saved
   MiB.
 - The cache hit must report exactly the header-only path and zero target-file
-  reads/writes. Forced verification must report 127 skipped files and zero
-  write calls when all files still match.
+  reads/writes. For the corrected Corpse Party bundle, forced verification must
+  report 128 skipped files and zero write calls when all files still match.
 - Compare 128/256/512 KiB blocks only on first-install data; select by median of
   interleaved runs rather than a single run.
-- Compare one ordinary 17 MiB SD file against the 127-file tree before
+- Compare one ordinary 17 MiB SD file against the 128-file tree before
   attributing any remaining difference to the physical card or AM importer.
 - Cancellation, truncated payload, CRC mismatch, empty files, larger/smaller
   replacements, and power-loss resend must retain current safety semantics.
